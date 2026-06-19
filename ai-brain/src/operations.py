@@ -283,7 +283,9 @@ def allocate_resources(events: list[dict[str, Any]], total_personnel: int = 50) 
         min_manpower, max_manpower = _severity_to_bounds(severity)
         min_bounds.append(min_manpower)
         max_bounds.append(max_manpower)
-        weights.append(float(event.get("risk_score", event.get("predicted_duration_min", 0.0))) + (5.0 if severity == "critical" else 0.0))
+        base_weight = float(event.get("risk_score", event.get("predicted_duration_min", 0.0)))
+        extra = 5.0 if severity == "critical" else 0.0
+        weights.append(base_weight + extra)
         severities.append(severity)
 
     # Decision vector is [x_0..x_n-1, y_0..y_n-1] where x is assigned personnel and y is whether the event is covered.

@@ -38,16 +38,34 @@ from reporting import build_service_payload, write_graphs, write_report_text
 SEVERITY_ORDER = ["low", "medium", "high", "critical"]
 MAX_FORECAST_MINUTES = 720.0
 
+# Explicit label mapping for the dedicated classifier stage
+SEVERITY_MAP = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+REV_SEVERITY_MAP = {v: k for k, v in SEVERITY_MAP.items()}
+
 DEFAULT_LIGHTGBM_PARAMS = {
     "objective": "huber",        
     "metric": "rmse",                 
     "boosting_type": "gbdt",
-    "num_leaves": 45,
-    "max_depth": 8,
-    "learning_rate": 0.03,
-    "min_data_in_leaf": 15,
-    "feature_fraction": 0.85,
-    "reg_lambda": 5.0,
+    "num_leaves": 35,             # Reduced from 45 to prevent overfitting on small datasets
+    "max_depth": 7,              # Capped depth to stabilize tree variance
+    "learning_rate": 0.02,        # Slower learning rate for better generalization
+    "min_data_in_leaf": 20,       # Ensured leaves aren't created for isolated noisy samples
+    "feature_fraction": 0.80,
+    "reg_lambda": 10.0,           # Increased regularization to smooth predictions toward the mean
+    "force_row_wise": True,
+    "verbose": -1
+}
+
+DEFAULT_CLASSIFIER_PARAMS = {
+    "objective": "multiclass",
+    "num_class": 4,
+    "metric": "multi_logloss",
+    "boosting_type": "gbdt",
+    "num_leaves": 24,             # Restricted leaf count to force robust, simpler decision splits
+    "max_depth": 5,              # Shallow trees prevent memorizing rare noisy cross-features
+    "learning_rate": 0.02,
+    "min_data_in_leaf": 20,
+    "class_weight": "balanced",  # Automatically adjusts weights to handle heavily skewed priority distributions
     "force_row_wise": True,
     "verbose": -1
 }
@@ -85,7 +103,7 @@ def _extract_pin(addr: str | None) -> str:
 
 
 def build_v2_target_maps(train_rows: list[dict[str, str]], global_median: float, duration_by_cause: dict[str, float]) -> dict[str, dict]:
-    """Compiles single variables along with compound joint intersections into a standard dictionary container."""
+    """Compiles multi-variable target lookups smoothed via m-estimate to prevent statistical volatility."""
     cc_groups = defaultdict(list)
     pin_groups = defaultdict(list)
     month_groups = defaultdict(list)
@@ -93,7 +111,7 @@ def build_v2_target_maps(train_rows: list[dict[str, str]], global_median: float,
     
     for r in train_rows:
         raw_dur = safe_float(r.get("_duration_min")) or global_median
-        dur = min(raw_dur, MAX_FORECAST_MINUTES)  # Cap extreme outliers to balance distributions
+        dur = min(raw_dur, MAX_FORECAST_MINUTES)
         
         c = normalize_text(r.get("event_cause")) or "unknown"
         co = normalize_text(r.get("corridor")) or "unknown"
@@ -110,11 +128,26 @@ def build_v2_target_maps(train_rows: list[dict[str, str]], global_median: float,
         if dt:
             month_groups[dt.month].append(dur)
             
+    # Smoothing factor (m): represents the pseudo-counts of global data forced onto small categories
+    m = 10.0 
+            
     return {
-        "duration_by_cause_corridor": {f"{k[0]}_x_{k[1]}": float(np.median(v)) for k, v in cc_groups.items()},
-        "duration_by_pin": {k: float(np.median(v)) for k, v in pin_groups.items()},
-        "duration_by_month": {str(k): float(np.median(v)) for k, v in month_groups.items()},
-        "duration_by_grid": {f"GRID_{k[0]}_{k[1]}": float(np.median(v)) for k, v in grid_groups.items()}
+        "duration_by_cause_corridor": {
+            f"{k[0]}_x_{k[1]}": float((len(v) * np.median(v) + m * global_median) / (len(v) + m)) 
+            for k, v in cc_groups.items()
+        },
+        "duration_by_pin": {
+            k: float((len(v) * np.median(v) + m * global_median) / (len(v) + m)) 
+            for k, v in pin_groups.items()
+        },
+        "duration_by_month": {
+            str(k): float((len(v) * np.median(v) + m * global_median) / (len(v) + m)) 
+            for k, v in month_groups.items()
+        },
+        "duration_by_grid": {
+            f"GRID_{k[0]}_{k[1]}": float((len(v) * np.median(v) + m * global_median) / (len(v) + m)) 
+            for k, v in grid_groups.items()
+        }
     }
 
 
@@ -143,7 +176,6 @@ def row_features(
     junction = _category(row.get("junction"))
     pin_code = _extract_pin(row.get("address"))
 
-    # V2 Multi-variable Joint Targets safely backed by container dict fallbacks
     cc_string_key = f"{cause}_x_{corridor}"
     if cc_string_key in v2_maps["duration_by_cause_corridor"]:
         features["cause_corridor_joint_median"] = v2_maps["duration_by_cause_corridor"][cc_string_key]
@@ -192,7 +224,12 @@ def row_features(
         features["hotspots_within_2.5km"] = 0.0
         features["hotspots_within_5km"] = 0.0
 
-    # Interaction Layout Metrics
+    # High-Leverage Macro Structural Cross-Features to Guide Classifier Tree Splits
+    is_peak = float(features.get("is_peak_hour", 0.0) == 1.0)
+    features["priority_x_road_closure"] = f"{features['priority']}_{int(features['road_closure_flag'])}"
+    features["cause_x_peak_hour"] = f"{cause}_{int(is_peak)}"
+
+    # Interaction Layout Metrics (Log-wrapped where necessary to squash outlier variance)
     features["critical_closure_interaction"] = float(features["priority_is_critical"] * features["road_closure_flag"])
     features["high_risk_location_event"] = float((features["hotspot_score"] > 50.0) and (features["priority_is_high"] == 1.0 or features["priority_is_critical"] == 1.0))
     features["is_weekend_planned"] = float(features.get("is_weekend", 0.0) == 1.0 and features["is_planned"] == 1.0)
@@ -200,7 +237,6 @@ def row_features(
     features["density_weighted_distance"] = float(features["dbscan_min_distance_km"] / (features["hotspots_within_2.5km"] + 1.0))
     features["regional_concentration_ratio"] = float((features["hotspots_within_2.5km"] + 1.0) / (features["hotspots_within_5km"] + 1.0))
     
-    is_peak = float(features.get("is_peak_hour", 0.0) == 1.0)
     features["peak_hour_high_priority"] = float(is_peak == 1.0 and (features["priority_is_high"] == 1.0 or features["priority_is_critical"] == 1.0))
     features["peak_road_closure"] = float(is_peak * features["road_closure_flag"])
     
@@ -210,7 +246,10 @@ def row_features(
     features["combined_risk_multiplier"] = float(features["corridor_deviation_factor"] * features["cause_deviation_factor"])
     
     features["cause_corridor_expected_scale"] = float(features["cause_median_duration"] * features["corridor_frequency"])
-    features["spatial_severity_bound"] = float(features["dbscan_nearest_hotspot_score"] * (features["corridor_median_duration"] + 1.0))
+    
+    # Variance Stabilization: Wrap heavy multiplication interactions inside a continuous log matrix
+    raw_spatial_bound = float(features["dbscan_nearest_hotspot_score"] * (features["corridor_median_duration"] + 1.0))
+    features["spatial_severity_bound"] = float(np.log1p(raw_spatial_bound))
 
     return features
 
@@ -224,7 +263,7 @@ def build_dataset(
 ) -> tuple[list[dict[str, float | str]], np.ndarray, np.ndarray]:
     x_rows: list[dict[str, float | str]] = []
     y_duration: list[float] = []
-    y_severity: list[str] = []
+    y_severity: list[int] = []
     
     for row in rows:
         x_rows.append(row_features(row, stats, v2_maps, dbscan_hotspots=dbscan_hotspots))
@@ -236,9 +275,12 @@ def build_dataset(
             duration = min(raw_duration, MAX_FORECAST_MINUTES)
             
         y_duration.append(duration)
-        y_severity.append(severity_tier(raw_duration))
         
-    return x_rows, np.asarray(y_duration, dtype=float), np.asarray(y_severity, dtype=object)
+        # Continuous ground truth text mapped directly down to numerical classification labels
+        tier_str = severity_tier(raw_duration)
+        y_severity.append(SEVERITY_MAP.get(tier_str, 0))
+        
+    return x_rows, np.asarray(y_duration, dtype=float), np.asarray(y_severity, dtype=int)
 
 
 def optimize_hyperparameters(X_train: np.ndarray, y_train: np.ndarray) -> dict[str, object]:
@@ -249,22 +291,22 @@ def optimize_hyperparameters(X_train: np.ndarray, y_train: np.ndarray) -> dict[s
             "objective": "huber",
             "metric": "rmse",
             "boosting_type": trial.suggest_categorical("boosting_type", ["gbdt", "dart"]),
-            "n_estimators": trial.suggest_int("n_estimators", 100, 400),
-            "num_leaves": trial.suggest_int("num_leaves", 31, 90),
-            "max_depth": trial.suggest_int("max_depth", 4, 12),
-            "learning_rate": trial.suggest_float("learning_rate", 0.008, 0.06, log=True),
-            "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 10, 40),
-            "feature_fraction": trial.suggest_float("feature_fraction", 0.65, 0.95),
-            "bagging_fraction": trial.suggest_float("bagging_fraction", 0.7, 1.0),
+            "n_estimators": trial.suggest_int("n_estimators", 150, 450),
+            "num_leaves": trial.suggest_int("num_leaves", 24, 45),
+            "max_depth": trial.suggest_int("max_depth", 5, 9),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.04, log=True),
+            "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 15, 40),
+            "feature_fraction": trial.suggest_float("feature_fraction", 0.70, 0.90),
+            "bagging_fraction": trial.suggest_float("bagging_fraction", 0.75, 0.95),
             "bagging_freq": trial.suggest_int("bagging_freq", 1, 5) if trial.relative_params.get("boosting_type") != "dart" else 0,
-            "reg_lambda": trial.suggest_float("reg_lambda", 1e-2, 50.0, log=True),
-            "reg_alpha": trial.suggest_float("reg_alpha", 1e-2, 50.0, log=True),
-            "huber_delta": trial.suggest_float("huber_delta", 0.8, 1.5),
+            "reg_lambda": trial.suggest_float("reg_lambda", 1.0, 40.0, log=True),
+            "reg_alpha": trial.suggest_float("reg_alpha", 1.0, 40.0, log=True),
+            "huber_delta": trial.suggest_float("huber_delta", 0.9, 1.4),
             "force_row_wise": True,
             "verbose": -1
         }
         
-        tscv = TimeSeriesSplit(n_splits=3)
+        tscv = TimeSeriesSplit(n_splits=4)
         fold_scores = []
         
         for train_idx, val_idx in tscv.split(X_train):
@@ -288,9 +330,9 @@ def optimize_hyperparameters(X_train: np.ndarray, y_train: np.ndarray) -> dict[s
             
         return float(np.mean(fold_scores))
 
-    print("🚀 Running Advanced Time-Series Optuna search space analysis...")
+    print("Running Advanced Time-Series Optuna search space analysis...")
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=35)
+    study.optimize(objective, n_trials=60)
     
     best_params = {
         "objective": "huber",
@@ -299,43 +341,53 @@ def optimize_hyperparameters(X_train: np.ndarray, y_train: np.ndarray) -> dict[s
         "verbose": -1,
         **study.best_params
     }
-    print(f"🎯 Ideal Parameters Secured: {json.dumps(study.best_params, indent=2)}")
+    print("Ideal Parameters Secured.")
     return best_params
 
 
 def fit_models(
     train_x: list[dict[str, float | str]],
     train_y_duration: np.ndarray,
+    train_y_severity: np.ndarray,
     lgb_params: dict[str, object],
-) -> tuple[DictVectorizer, lgb.LGBMRegressor]:
-    vec_duration = DictVectorizer(sparse=False)
-    X_duration = vec_duration.fit_transform(train_x).astype(np.float32, copy=False)
+) -> tuple[DictVectorizer, lgb.LGBMRegressor, lgb.LGBMClassifier]:
+    vec = DictVectorizer(sparse=False)
+    X_train = vec.fit_transform(train_x).astype(np.float32, copy=False)
 
+    # Engine 1: Continuous Duration Tracker (Regression)
     duration_model = lgb.LGBMRegressor(**lgb_params)
-    duration_model.fit(X_duration, np.log1p(train_y_duration))
+    duration_model.fit(X_train, np.log1p(train_y_duration))
 
-    return vec_duration, duration_model
+    # Engine 2: Native 4-Class Probability Evaluator (Classification)
+    severity_model = lgb.LGBMClassifier(**DEFAULT_CLASSIFIER_PARAMS)
+    severity_model.fit(X_train, train_y_severity)
+
+    return vec, duration_model, severity_model
 
 
 def evaluate_models(
-    duration_vec: DictVectorizer,
+    vec: DictVectorizer,
     duration_model: lgb.LGBMRegressor,
+    severity_model: lgb.LGBMClassifier,
     test_x: list[dict[str, float | str]],
     test_y_duration: np.ndarray,
     test_y_severity: np.ndarray,
 ) -> dict[str, float | str]:
-    log_pred = duration_model.booster_.predict(duration_vec.transform(test_x).astype(np.float32, copy=False))
+    X_test = vec.transform(test_x).astype(np.float32, copy=False)
+    
+    # Evaluate Regression Performance
+    log_pred = duration_model.booster_.predict(X_test)
     duration_pred = np.expm1(log_pred)
     duration_pred = np.clip(duration_pred, 0.0, MAX_FORECAST_MINUTES)
-    
     test_y_duration = np.clip(test_y_duration, 0.0, MAX_FORECAST_MINUTES)
 
     duration_mae = mean_absolute_error(test_y_duration, duration_pred)
     duration_rmse = math.sqrt(mean_squared_error(test_y_duration, duration_pred))
     duration_r2 = r2_score(test_y_duration, duration_pred)
     
-    pred_severity = np.array([severity_tier(d) for d in duration_pred], dtype=object)
-    sev_accuracy = accuracy_score(test_y_severity, pred_severity)
+    # Evaluate Multi-Class Severity Performance
+    pred_sev_indices = severity_model.predict(X_test)
+    sev_accuracy = accuracy_score(test_y_severity, pred_sev_indices)
 
     return {
         "duration_mae_min": float(duration_mae),
@@ -346,7 +398,7 @@ def evaluate_models(
 
 
 def make_prediction_bundle(
-    duration_vec: DictVectorizer,
+    vec: DictVectorizer,
     duration_model: lgb.LGBMRegressor,
     stats: AggregateStats,
     v2_maps: dict[str, dict],
@@ -359,7 +411,8 @@ def make_prediction_bundle(
     dbscan_hotspots = [asdict(item) for item in build_dbscan_hotspots(train_rows)]
     train_x = [row_features(r, stats, v2_maps, dbscan_hotspots=dbscan_hotspots) for r in train_rows]
     
-    log_train_pred = duration_model.booster_.predict(duration_vec.transform(train_x).astype(np.float32, copy=False))
+    X_train = vec.transform(train_x).astype(np.float32, copy=False)
+    log_train_pred = duration_model.booster_.predict(X_train)
     train_duration_pred = np.expm1(log_train_pred)
     train_duration_pred = np.clip(train_duration_pred, 0.0, MAX_FORECAST_MINUTES)
     
@@ -372,7 +425,7 @@ def make_prediction_bundle(
     }
     gain_importance = duration_model.booster_.feature_importance(importance_type="gain")
     split_importance = duration_model.booster_.feature_importance(importance_type="split")
-    feature_names = duration_vec.get_feature_names_out().tolist()
+    feature_names = vec.get_feature_names_out().tolist()
     feature_importance = [
         {
             "feature": name,
@@ -494,10 +547,7 @@ def train_and_save(rows: list[dict[str, str]], outdir: Path, skip_tuning: bool =
     supervised_rows = load_supervised_rows(rows)
     train_rows, test_rows = split_time_order(supervised_rows, test_fraction=0.2)
     
-    # 1. Compile immutable foundation stats object
     stats = fit_aggregate_stats(train_rows)
-    
-    # 2. Build our separate target lookup mappings to avoid dataclass dynamic attribute errors
     v2_maps = build_v2_target_maps(train_rows, stats.global_duration_median, stats.duration_by_cause)
     
     planned_stats = build_planned_impact_stats(train_rows)
@@ -517,8 +567,8 @@ def train_and_save(rows: list[dict[str, str]], outdir: Path, skip_tuning: bool =
         print("Using default robust configurations.")
         lgb_params = DEFAULT_LIGHTGBM_PARAMS
 
-    duration_vec, duration_model = fit_models(train_x, train_y_duration, lgb_params)
-    metrics = evaluate_models(duration_vec, duration_model, test_x, test_y_duration, test_y_severity)
+    vec, duration_model, severity_model = fit_models(train_x, train_y_duration, train_y_severity, lgb_params)
+    metrics = evaluate_models(vec, duration_model, severity_model, test_x, test_y_duration, test_y_severity)
     
     metrics["train_rows"] = float(len(train_rows))
     metrics["test_rows"] = float(len(test_rows))
@@ -526,11 +576,15 @@ def train_and_save(rows: list[dict[str, str]], outdir: Path, skip_tuning: bool =
     duration_model_path = outdir / "lightgbm_duration.txt"
     duration_model.booster_.save_model(str(duration_model_path))
     duration_model.booster_.save_model(str(outdir / "lgb_model.txt"))
+    
+    # Save the dedicated classifier binary alongside the dictionary vectorizer
+    with (outdir / "severity_classifier.pkl").open("wb") as f:
+        pickle.dump(severity_model, f)
     with (outdir / "vec.pkl").open("wb") as f:
-        pickle.dump(duration_vec, f)
+        pickle.dump(vec, f)
         
     bundle = make_prediction_bundle(
-        duration_vec,
+        vec,
         duration_model,
         stats,
         v2_maps,
