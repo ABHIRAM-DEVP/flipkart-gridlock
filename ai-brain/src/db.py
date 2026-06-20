@@ -1,40 +1,48 @@
-"""SQLite schema and CRUD helpers for Astram."""
+"""PostgreSQL-backed schema and CRUD helpers for Astram.
+
+This module provides a thin compatibility wrapper so existing code that
+uses `conn.execute(sql, params)` with `?` placeholders and `executescript`
+continues to work when backed by PostgreSQL via psycopg. It reads
+connection parameters from environment variables and falls back to the
+`postgres` service defined in docker-compose.
+"""
 from __future__ import annotations
 
 import json
-import sqlite3
+import os
 import threading
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-DB_PATH = Path(__file__).resolve().parent.parent / "artifacts" / "astram.db"
+import psycopg
+from psycopg.rows import dict_row
+
 _WRITE_LOCK = threading.Lock()
 
+# SQL schema converted to Postgres-compatible types and defaults
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    external_id           TEXT UNIQUE,
-    event_type            TEXT,
-    event_cause           TEXT,
-    corridor              TEXT,
-    zone                  TEXT,
-    junction              TEXT,
-    latitude              REAL,
-    longitude             REAL,
-    priority              TEXT,
+    id SERIAL PRIMARY KEY,
+    external_id TEXT UNIQUE,
+    event_type TEXT,
+    event_cause TEXT,
+    corridor TEXT,
+    zone TEXT,
+    junction TEXT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    priority TEXT,
     requires_road_closure INTEGER DEFAULT 0,
-    address               TEXT,
-    start_datetime        TEXT,
-    end_datetime          TEXT,
-    closed_datetime       TEXT,
-    resolved_datetime     TEXT,
-    status                TEXT,
-    description           TEXT,
-    direction             TEXT,
-    veh_type              TEXT,
-    police_station        TEXT,
-    created_at            TEXT DEFAULT (datetime('now'))
+    address TEXT,
+    start_datetime TIMESTAMP,
+    end_datetime TIMESTAMP,
+    closed_datetime TIMESTAMP,
+    resolved_datetime TIMESTAMP,
+    status TEXT,
+    description TEXT,
+    direction TEXT,
+    veh_type TEXT,
+    police_station TEXT,
+    created_at TIMESTAMP DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_corridor ON events(corridor);
@@ -42,16 +50,16 @@ CREATE INDEX IF NOT EXISTS idx_events_start ON events(start_datetime);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 
 CREATE TABLE IF NOT EXISTS predictions (
-    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
-    input_payload          TEXT NOT NULL,
-    predicted_duration_min REAL,
-    predicted_severity     TEXT,
-    prediction_interval    TEXT,
-    resource_plan          TEXT,
-    planned_impact         TEXT,
-    model_version          TEXT DEFAULT 'v1',
-    corridor               TEXT,
-    created_at             TEXT DEFAULT (datetime('now'))
+    id SERIAL PRIMARY KEY,
+    input_payload TEXT NOT NULL,
+    predicted_duration_min DOUBLE PRECISION,
+    predicted_severity TEXT,
+    prediction_interval TEXT,
+    resource_plan TEXT,
+    planned_impact TEXT,
+    model_version TEXT DEFAULT 'v1',
+    corridor TEXT,
+    created_at TIMESTAMP DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_pred_created ON predictions(created_at DESC);
@@ -59,71 +67,120 @@ CREATE INDEX IF NOT EXISTS idx_pred_severity ON predictions(predicted_severity);
 CREATE INDEX IF NOT EXISTS idx_pred_corridor ON predictions(corridor);
 
 CREATE TABLE IF NOT EXISTS batch_plans (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    input_events     TEXT NOT NULL,
+    id SERIAL PRIMARY KEY,
+    input_events TEXT NOT NULL,
     personnel_budget INTEGER NOT NULL,
-    scored_events    TEXT,
-    allocation       TEXT,
-    created_at       TEXT DEFAULT (datetime('now'))
+    scored_events TEXT,
+    allocation TEXT,
+    created_at TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS planned_impact_forecasts (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    input_payload       TEXT NOT NULL,
-    planned_key         TEXT,
-    baseline_rate       REAL,
-    spillover_per_event REAL,
-    impact_multiplier   REAL,
-    risk_score          REAL,
-    corridor            TEXT,
-    created_at          TEXT DEFAULT (datetime('now'))
+    id SERIAL PRIMARY KEY,
+    input_payload TEXT NOT NULL,
+    planned_key TEXT,
+    baseline_rate DOUBLE PRECISION,
+    spillover_per_event DOUBLE PRECISION,
+    impact_multiplier DOUBLE PRECISION,
+    risk_score DOUBLE PRECISION,
+    corridor TEXT,
+    created_at TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS model_runs (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    rows_total            INTEGER,
-    rows_with_duration    INTEGER,
-    train_rows            INTEGER,
-    test_rows             INTEGER,
-    duration_mae_min      REAL,
-    duration_rmse_min     REAL,
-    duration_r2           REAL,
-    severity_accuracy     REAL,
-    severity_f1_macro     REAL,
-    severity_f1_weighted  REAL,
+    id SERIAL PRIMARY KEY,
+    rows_total INTEGER,
+    rows_with_duration INTEGER,
+    train_rows INTEGER,
+    test_rows INTEGER,
+    duration_mae_min DOUBLE PRECISION,
+    duration_rmse_min DOUBLE PRECISION,
+    duration_r2 DOUBLE PRECISION,
+    severity_accuracy DOUBLE PRECISION,
+    severity_f1_macro DOUBLE PRECISION,
+    severity_f1_weighted DOUBLE PRECISION,
     classification_report TEXT,
-    model_version         TEXT,
-    trained_at            TEXT DEFAULT (datetime('now'))
+    model_version TEXT,
+    trained_at TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS hotspot_snapshots (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     snapshot_type TEXT,
-    data          TEXT NOT NULL,
-    computed_at   TEXT DEFAULT (datetime('now'))
+    data TEXT NOT NULL,
+    computed_at TIMESTAMP DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS live_feed_events (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_type  TEXT,
-    payload     TEXT NOT NULL,
-    created_at  TEXT DEFAULT (datetime('now'))
+    id SERIAL PRIMARY KEY,
+    event_type TEXT,
+    payload TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT now()
 );
 """
 
 
-def get_conn() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.row_factory = sqlite3.Row
+def _pg_connect():
+    host = os.getenv("POSTGRES_HOST", "postgres")
+    port = int(os.getenv("POSTGRES_PORT", "5432"))
+    db = os.getenv("POSTGRES_DB", "astram")
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "data45Dada")
+    conn = psycopg.connect(
+        host=host, port=port, dbname=db, user=user, password=password, autocommit=False
+    )
     return conn
 
 
-def _row_to_dict(row: sqlite3.Row | None) -> dict | None:
-    if row is None:
-        return None
-    return {k: row[k] for k in row.keys()}
+class _PgConnWrapper:
+    """Wrap a psycopg connection to provide a sqlite-style `execute` and
+    `executescript` used by the existing code. It also provides `row_factory`
+    compatibility by returning dict rows.
+    """
+
+    def __init__(self, conn: psycopg.Connection):
+        self._conn = conn
+
+    def execute(self, sql: str, params: tuple | list | None = None):
+        # Normalize SQLite-style constructs to Postgres-compatible SQL.
+        sql2 = sql.replace("?", "%s")
+        # Convert `INSERT OR IGNORE INTO` -> `INSERT INTO ... ON CONFLICT DO NOTHING`
+        low = sql2.lower()
+        if "insert or ignore into" in low:
+            # naive replacement: remove 'or ignore' and append ON CONFLICT DO NOTHING
+            sql2 = sql2.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+            sql2 = sql2 + " ON CONFLICT DO NOTHING"
+        cur = self._conn.cursor(row_factory=dict_row)
+        if params:
+            cur.execute(sql2, tuple(params))
+        else:
+            cur.execute(sql2)
+        return cur
+
+    def executescript(self, script: str):
+        cur = self._conn.cursor()
+        statements = [s.strip() for s in script.split(";") if s.strip()]
+        for s in statements:
+            cur.execute(s)
+        return cur
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+
+def get_conn():
+    raw = _pg_connect()
+    return _PgConnWrapper(raw)
+
+
+def _row_to_dict(row: dict | None) -> dict | None:
+    return dict(row) if row else None
 
 
 def _json_loads(value: str | None, default: Any = None) -> Any:
@@ -157,6 +214,7 @@ def insert_prediction(input_payload: dict, result: dict) -> int:
                 (input_payload, predicted_duration_min, predicted_severity,
                  prediction_interval, resource_plan, planned_impact, corridor)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """,
                 (
                     json.dumps(input_payload),
@@ -169,7 +227,8 @@ def insert_prediction(input_payload: dict, result: dict) -> int:
                 ),
             )
             conn.commit()
-            return int(cur.lastrowid)
+            row = cur.fetchone()
+            return int(row["id"]) if row and "id" in row else -1
         finally:
             conn.close()
 
@@ -202,11 +261,13 @@ def insert_batch_plan(events: list, budget: int, scored: list, allocation: dict)
                 """
                 INSERT INTO batch_plans (input_events, personnel_budget, scored_events, allocation)
                 VALUES (?, ?, ?, ?)
+                RETURNING id
                 """,
                 (json.dumps(events), budget, json.dumps(scored), json.dumps(allocation)),
             )
             conn.commit()
-            return int(cur.lastrowid)
+            row = cur.fetchone()
+            return int(row["id"]) if row and "id" in row else -1
         finally:
             conn.close()
 
@@ -241,6 +302,7 @@ def insert_planned_impact(input_payload: dict, result: dict) -> int:
                 (input_payload, planned_key, baseline_rate, spillover_per_event,
                  impact_multiplier, risk_score, corridor)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """,
                 (
                     json.dumps(input_payload),
@@ -253,7 +315,8 @@ def insert_planned_impact(input_payload: dict, result: dict) -> int:
                 ),
             )
             conn.commit()
-            return int(cur.lastrowid)
+            row = cur.fetchone()
+            return int(row["id"]) if row and "id" in row else -1
         finally:
             conn.close()
 
@@ -288,6 +351,7 @@ def insert_model_run(summary: dict) -> int:
                  severity_accuracy, severity_f1_macro, severity_f1_weighted,
                  classification_report, model_version)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """,
                 (
                     summary.get("rows_total"),
@@ -305,7 +369,8 @@ def insert_model_run(summary: dict) -> int:
                 ),
             )
             conn.commit()
-            return int(cur.lastrowid)
+            row = cur.fetchone()
+            return int(row["id"]) if row and "id" in row else -1
         finally:
             conn.close()
 

@@ -38,12 +38,13 @@ def seed() -> tuple[int, int]:
                 lon = float(row["longitude"]) if row.get("longitude") else None
                 cur = conn.execute(
                     """
-                    INSERT OR IGNORE INTO events
+                    INSERT INTO events
                     (external_id, event_type, event_cause, corridor, zone, junction,
                      latitude, longitude, priority, requires_road_closure, address,
                      start_datetime, end_datetime, closed_datetime, resolved_datetime,
                      status, description, direction, veh_type, police_station)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT (external_id) DO NOTHING
                     """,
                     (
                         row.get("id"),

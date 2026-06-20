@@ -92,3 +92,20 @@ export const getReportText = () => fetchApi<string>('/reports/text');
 export const getGraphFiles = () => fetchApi<string[]>('/reports/graph-files');
 
 export const getGraphImageUrl = (name: string) => `${API_BASE}/reports/graph/${name}`;
+
+// Agentic workflow
+export const runAgent = (data: any) => fetchApi<any>('/agent/run', { method: 'POST', body: JSON.stringify(data) });
+
+export const subscribeSSE = (onMessage: (msg: any) => void) => {
+  const url = `${API_BASE.replace('/api', '')}/sse/live`;
+  const es = new EventSource(url);
+  es.onmessage = (e) => {
+    try {
+      const parsed = JSON.parse(e.data);
+      onMessage(parsed);
+    } catch (err) {
+      onMessage({ type: 'raw', data: e.data });
+    }
+  };
+  return () => es.close();
+};

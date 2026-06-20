@@ -7,6 +7,7 @@ import { MetricsSummaryCard } from "@/components/MetricsSummaryCard";
 import { FeatureWeightsChart } from "@/components/FeatureWeightsChart";
 import { HotspotsMap } from "@/components/HotspotsMap";
 import { PredictionHistoryTable } from "@/components/PredictionHistoryTable";
+import { AgentControl } from "@/components/AgentControl";
 
 const problemCards = [
   {
@@ -120,6 +121,9 @@ export default function Dashboard() {
             </span>
           </div>
           <PredictionHistoryTable history={predictions.slice(0, 5)} />
+          <div className="mt-4">
+            <AgentControl />
+          </div>
         </SoftCard>
       </section>
 

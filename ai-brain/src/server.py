@@ -160,9 +160,9 @@ def _register_model_run_from_artifacts() -> None:
 def _startup() -> None:
     db.init_db()
     seed_db_if_empty()
-    _ensure_state()
+    state = _ensure_state()
     _register_model_run_from_artifacts()
-    snap = _ensure_state()
+    snap = state
     db.insert_hotspot_snapshot("dbscan", snap["bundle"].get("dbscan_hotspots", []))
     db.insert_hotspot_snapshot("corridor", snap["bundle"].get("train_hotspots", []))
 
@@ -171,8 +171,9 @@ def _startup() -> None:
 
 @app.get("/health")
 def health():
-    _ensure_state()
-    return jsonify({"status": "ok", "model_loaded": True})
+    state = _ensure_state()
+    model_loaded = bool(state.get("pipeline") and state.get("pipeline_data") and state["pipeline_data"].get("dur_model"))
+    return jsonify({"status": "ok", "model_loaded": model_loaded})
 
 
 @app.get("/metrics")
@@ -298,6 +299,9 @@ def feedback_summary():
 def predict():
     event = _normalize_event(request.get_json(force=True) or {})
     state = _ensure_state()
+    model_loaded = bool(state.get("pipeline") and state.get("pipeline_data") and state["pipeline_data"].get("dur_model"))
+    if not model_loaded:
+        return jsonify({"error": "models not loaded"}), 503
     result = predict_event(event, state)
     insert_prediction(event, result)
     broadcaster.publish("prediction", {**result, "event": event})
@@ -314,6 +318,9 @@ def plan():
         events = body.get("events", [])
         budget = int(body.get("budget", 50))
     state = _ensure_state()
+    model_loaded = bool(state.get("pipeline") and state.get("pipeline_data") and state["pipeline_data"].get("dur_model"))
+    if not model_loaded:
+        return jsonify({"error": "models not loaded"}), 503
     scored = [predict_event(_normalize_event(e), state) | {"event": e} for e in events]
     allocation = allocate_resources(scored, total_personnel=budget)
     result = {"scored_events": scored, "allocation": allocation}
@@ -326,6 +333,9 @@ def plan():
 def planned_impact():
     event = _normalize_event(request.get_json(force=True) or {})
     state = _ensure_state()
+    model_loaded = bool(state.get("pipeline") and state.get("pipeline_data") and state["pipeline_data"].get("dur_model"))
+    if not model_loaded:
+        return jsonify({"error": "models not loaded"}), 503
     bundle = state["bundle"]
     stats = _reconstruct_stats(bundle["stats"])
     planned_stats = PlannedImpactStats(**bundle["planned_stats"])
@@ -346,6 +356,9 @@ def sample_predict():
     with csv_path.open(newline="", encoding="utf-8", errors="replace") as f:
         sample = next(csv.DictReader(f))
     state = _ensure_state()
+    model_loaded = bool(state.get("pipeline") and state.get("pipeline_data") and state["pipeline_data"].get("dur_model"))
+    if not model_loaded:
+        return jsonify({"error": "models not loaded"}), 503
     prediction = predict_event(_normalize_event(sample), state)
     return jsonify({"sample_event": sample, "prediction": prediction})
 
@@ -416,6 +429,75 @@ def sse_live():
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/agent/run")
+def agent_run():
+    """Run an agentic workflow: Predict -> Plan -> Planned Impact for provided events.
+    Accepts JSON { events: [...], budget?: int } or runs sample if empty.
+    Emits SSE messages via `broadcaster.publish` for progress updates.
+    """
+    body = request.get_json(force=True) or {}
+    events = body.get("events") or []
+    budget = int(body.get("budget", 50))
+
+    state = _ensure_state()
+    if not events:
+        # fallback: sample first few seeded events from artifacts dataset
+        from seed_db import _resolve_csv_path
+        import csv
+
+        csv_path = _resolve_csv_path()
+        if not csv_path:
+            return jsonify({"error": "no events provided and no CSV available"}), 400
+        with csv_path.open(newline="", encoding="utf-8", errors="replace") as f:
+            reader = csv.DictReader(f)
+            for i, row in enumerate(reader):
+                if i >= 6:
+                    break
+                events.append(_normalize_event(row))
+
+    # Run predictions
+    scored = []
+    for i, ev in enumerate(events):
+        broadcaster.publish("agent.progress", {"step": "predict", "index": i, "total": len(events), "event": ev})
+        try:
+            pred = predict_event(ev, state)
+        except Exception as exc:
+            pred = {"error": str(exc)}
+        insert_prediction(ev, pred)
+        broadcaster.publish("agent.prediction", {"index": i, "prediction": pred, "event": ev})
+        scored.append(pred | {"event": ev})
+
+    # Allocate resources (plan)
+    broadcaster.publish("agent.progress", {"step": "plan", "total": len(events)})
+    allocation = allocate_resources(scored, total_personnel=budget)
+    db.insert_batch_plan(events, budget, scored, allocation)
+    broadcaster.publish("agent.plan", {"allocation": allocation, "scored_events": scored})
+
+    # Forecast planned impacts for each planned item
+    impacts = []
+    bundle = state.get("bundle") or {}
+    stats = _reconstruct_stats(bundle.get("stats") or {})
+    planned_stats = None
+    try:
+        planned_stats = type("P", (), {})()
+        planned_stats.__dict__.update(bundle.get("planned_stats") or {})
+    except Exception:
+        planned_stats = None
+
+    for i, scored_item in enumerate(scored):
+        broadcaster.publish("agent.progress", {"step": "planned-impact", "index": i, "total": len(scored)})
+        try:
+            impact = forecast_planned_event(scored_item.get("event") or scored_item, stats, planned_stats)
+        except Exception as exc:
+            impact = {"error": str(exc)}
+        db.insert_planned_impact(scored_item.get("event") or scored_item, impact)
+        impacts.append(impact)
+        broadcaster.publish("agent.planned_impact", {"index": i, "impact": impact})
+
+    broadcaster.publish("agent.complete", {"plans": allocation, "impacts": impacts})
+    return jsonify({"status": "ok", "plans": allocation, "impacts": impacts})
 
 
 # ── HTML pages ───────────────────────────────────────────────────────────────
