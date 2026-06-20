@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: astram-backend
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/astram}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:data45Dada}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+server:
+  port: 8080
+
+astram:
+  service:
+    url: ${ASTRAM_SERVICE_URL:http://localhost:8000}
+  fallback:
+    dir: ${ASTRAM_FALLBACK_DIR:../artifacts}
+
+logging:
+  level:
+    com.astram: DEBUG
+    org.springframework.web.reactive.function.client.ExchangeFunctions: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

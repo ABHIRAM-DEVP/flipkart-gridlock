@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Planned Impact{% endblock %}
+{% block header %}Planned Event Impact Forecast{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="font-semibold">Planned Event</h2>
+      <button type="button" id="btn-sample" class="text-xs px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Load Sample</button>
+    </div>
+    <form id="planned-form" class="space-y-3 text-sm">
+      <div class="grid grid-cols-2 gap-3">
+        <label class="block col-span-2">Start DateTime
+          <input name="start_datetime" type="datetime-local" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600" required />
+        </label>
+        <label class="block">Event Type
+          <select name="event_type" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600">
+            <option value="planned">planned</option>
+          </select>
+        </label>
+        <label class="block">Priority
+          <select name="priority" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600">
+            <option value="high">high</option>
+            <option value="medium">medium</option>
+            <option value="low">low</option>
+          </select>
+        </label>
+        <label class="block">Event Cause
+          <select name="event_cause" id="select-cause" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600"></select>
+        </label>
+        <label class="block">Corridor
+          <select name="corridor" id="select-corridor" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600"></select>
+        </label>
+        <label class="block">Zone
+          <select name="zone" id="select-zone" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600"></select>
+        </label>
+        <label class="block">Junction
+          <input name="junction" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+        </label>
+        <label class="block">Latitude
+          <input name="latitude" type="number" step="any" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+        </label>
+        <label class="block">Longitude
+          <input name="longitude" type="number" step="any" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+        </label>
+        <label class="block col-span-2">Address
+          <input name="address" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+        </label>
+        <label class="flex items-center gap-2 col-span-2">
+          <input name="requires_road_closure" type="checkbox" checked class="rounded" />
+          Requires road closure
+        </label>
+      </div>
+      <button type="submit" class="w-full py-3 rounded-lg bg-brand hover:bg-brand-dark font-semibold">Forecast Impact</button>
+    </form>
+  </div>
+
+  <div id="impact-result" class="bg-slate-800 rounded-xl border border-slate-700 p-5 space-y-4 hidden">
+    <h3 class="text-brand font-semibold">Planned Event Impact Forecast</h3>
+    <div class="font-mono text-xs text-slate-400" id="planned-key">—</div>
+    <div class="grid grid-cols-2 gap-4 text-sm">
+      <div>Baseline Unplanned Rate<br><strong id="baseline">—</strong></div>
+      <div>Spillover per Event<br><strong id="spillover">—</strong></div>
+      <div>Impact Multiplier<br><strong id="multiplier">—</strong></div>
+      <div>Pre-position<br><strong id="preposition">—</strong></div>
+    </div>
+    <div>
+      <div class="flex justify-between text-xs text-slate-400 mb-1">
+        <span>Compounding Risk Score</span>
+        <span id="risk-val">— / 100</span>
+      </div>
+      <div class="h-3 bg-slate-700 rounded">
+        <div id="risk-bar" class="h-3 rounded bg-green-500 transition-all duration-500" style="width:0%"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/planned.js"></script>
+{% endblock %}

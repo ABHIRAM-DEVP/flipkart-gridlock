@@ -83,6 +83,10 @@ def _text_response(handler: BaseHTTPRequestHandler, status: int, text: str, cont
     handler.wfile.write(encoded)
 
 
+def _html_response(handler: BaseHTTPRequestHandler, status: int, html: str) -> None:
+    _text_response(handler, status, html, content_type="text/html; charset=utf-8")
+
+
 def _feature_weights(payload: dict[str, object], kind: str = "duration", top: int = 15) -> list[dict[str, float | str]]:
     fw = payload.get("feature_weights") or {}
     if not fw and payload.get("feature_importance"):
@@ -156,11 +160,86 @@ class AstramHandler(BaseHTTPRequestHandler):
         payload = self.state["payload"]
 
         if path == "/":
-            home = {
-                "service": "Astram backend microservice",
-                "endpoints": ["/health", "/metrics", "/graphs", "/weights", "/report.txt", "/predict", "/plan", "/planned-impact", "/feedback/summary", "/files", "/workflow", "/layers", "/graph-files"],
-            }
-            return _json_response(self, HTTPStatus.OK, home)
+            html = """
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Astram Backend</title>
+  <style>
+    :root { color-scheme: light; --bg: #07111f; --panel: #0d1b2a; --text: #e5eef8; --muted: #9eb2c8; --accent: #5eead4; --line: #19324d; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: radial-gradient(circle at top, #12304d 0, #07111f 55%, #040a12 100%);
+      color: var(--text);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .card {
+      width: min(960px, 100%);
+      background: rgba(13, 27, 42, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.35);
+    }
+    h1 { margin: 0 0 8px; font-size: clamp(2rem, 4vw, 3.2rem); }
+    p { margin: 0 0 18px; color: var(--muted); line-height: 1.5; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 18px; }
+    .box { border: 1px solid var(--line); background: rgba(7, 17, 31, 0.7); border-radius: 16px; padding: 14px; }
+    .box h2 { margin: 0 0 8px; font-size: 1rem; color: var(--accent); }
+    code, a { color: #9be7ff; }
+    ul { margin: 0; padding-left: 18px; }
+    li { margin: 6px 0; }
+    .status { display: inline-flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 999px; border: 1px solid #21506f; background: rgba(6, 35, 44, 0.7); color: #9ff4dc; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #2dd4bf; box-shadow: 0 0 0 6px rgba(45, 212, 191, 0.12); }
+    .footer { margin-top: 18px; color: var(--muted); font-size: 0.92rem; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <span class="status"><span class="dot"></span>Service online</span>
+    <h1>Astram backend microservice</h1>
+    <p>Use this server for event duration prediction, resource planning, hotspot analytics, and feedback-driven retraining.</p>
+    <div class="grid">
+      <section class="box">
+        <h2>Health</h2>
+        <ul>
+          <li><a href="/health">/health</a></li>
+          <li><a href="/metrics">/metrics</a></li>
+          <li><a href="/graphs">/graphs</a></li>
+        </ul>
+      </section>
+      <section class="box">
+        <h2>Prediction</h2>
+        <ul>
+          <li><a href="/weights?kind=duration&top=10">/weights</a></li>
+          <li><a href="/app-data">/app-data</a></li>
+          <li><a href="/workflow">/workflow</a></li>
+        </ul>
+      </section>
+      <section class="box">
+        <h2>Ops</h2>
+        <ul>
+          <li><a href="/files">/files</a></li>
+          <li><a href="/graph-files">/graph-files</a></li>
+          <li><a href="/feedback/summary">/feedback/summary</a></li>
+        </ul>
+      </section>
+    </div>
+    <div class="footer">
+      POST JSON to <code>/predict</code>, <code>/plan</code>, or <code>/planned-impact</code>.
+    </div>
+  </main>
+</body>
+</html>
+            """.strip()
+            return _html_response(self, HTTPStatus.OK, html)
 
         if path == "/health":
             return _json_response(self, HTTPStatus.OK, {"status": "ok", "model_loaded": True})

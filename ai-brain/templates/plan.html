@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Plan{% endblock %}
+{% block header %}Batch Resource Planning{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    <h2 class="font-semibold mb-4">Batch Events</h2>
+    <form id="plan-form" class="space-y-4">
+      <label class="block text-sm text-slate-400">Events JSON Array
+        <textarea id="events-json" rows="12" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600 font-mono text-xs"></textarea>
+      </label>
+      <label class="block text-sm text-slate-400">Personnel Budget
+        <input id="budget" type="number" min="1" value="50" class="w-full mt-1 px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+      </label>
+      <div class="flex gap-2">
+        <button type="button" id="btn-add-event" class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600 text-sm">Add Event</button>
+        <button type="submit" id="btn-plan" class="flex-1 py-2 rounded-lg bg-brand hover:bg-brand-dark font-semibold">Run Plan</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="space-y-6">
+    <div id="plan-results" class="bg-slate-800 rounded-xl border border-slate-700 p-5 hidden">
+      <div class="flex items-center gap-2 mb-3">
+        <span id="alloc-status" class="px-2 py-1 text-xs rounded bg-green-600 text-white">OPTIMAL</span>
+        <span class="text-slate-400 text-sm"><span id="alloc-remaining">—</span> of <span id="alloc-budget">50</span> personnel remaining</span>
+      </div>
+      <div class="h-2 bg-slate-700 rounded mb-4">
+        <div id="alloc-bar" class="h-2 bg-brand rounded transition-all" style="width:0%"></div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-slate-400 border-b border-slate-700">
+              <th class="py-2 text-left">#</th>
+              <th class="py-2 text-left">Type</th>
+              <th class="py-2 text-left">Severity</th>
+              <th class="py-2 text-left">Assigned</th>
+              <th class="py-2 text-left">Covered</th>
+              <th class="py-2 text-left">Risk</th>
+              <th class="py-2 text-left">Duration</th>
+            </tr>
+          </thead>
+          <tbody id="alloc-rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <h2 class="font-semibold mb-3">Plan History</h2>
+      <div id="plan-history"></div>
+    </div>
+  </div>
+</div>
+
+<div id="event-modal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4">
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+    <h3 class="font-semibold mb-3">Add Event</h3>
+    <form id="modal-form" class="space-y-2 text-sm">
+      <input name="start_datetime" type="datetime-local" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600" required />
+      <select name="event_type" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600"><option>planned</option><option>unplanned</option></select>
+      <input name="event_cause" placeholder="event_cause" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+      <input name="corridor" placeholder="corridor" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+      <input name="zone" placeholder="zone" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+      <input name="junction" placeholder="junction" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+      <input name="latitude" type="number" step="any" placeholder="latitude" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+      <input name="longitude" type="number" step="any" placeholder="longitude" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600" />
+      <select name="priority" class="w-full px-3 py-2 rounded bg-slate-900 border border-slate-600"><option>high</option><option>medium</option><option>low</option></select>
+      <label class="flex items-center gap-2"><input name="requires_road_closure" type="checkbox" /> Road closure</label>
+      <div class="flex gap-2 pt-2">
+        <button type="button" id="modal-cancel" class="px-4 py-2 rounded bg-slate-700">Cancel</button>
+        <button type="submit" class="flex-1 py-2 rounded bg-brand">Append</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/plan.js"></script>
+{% endblock %}

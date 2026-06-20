@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@theme {
+  --color-stone: #292524;
+  --color-coral: #FFB7B2;
+  --color-sage: #E8EFE8;
+  --color-lavender: #EFEDF4;
+}
+
+:root {
+  /* Softly Foundation */
+  --bg-color: #FDFCF8;
+  --text-main: #292524;
+  --text-muted: #78716C;
+  
+  /* Palette */
+  --accent-coral: #FFB7B2;
+  --accent-sage: #E8EFE8;
+  --accent-lavender: #EFEDF4;
+  
+  /* Typography */
+  --font-primary: 'Outfit', sans-serif;
+  --font-accent: 'Reenie Beanie', cursive;
+  
+  /* Effects */
+  --radius-card: 2rem;
+  --shadow-soft: 0 4px 20px -2px rgba(0,0,0,0.05);
+  --grain-opacity: 0.35;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-main);
+  font-family: var(--font-primary);
+  margin: 0;
+  overflow-x: hidden;
+}
+
+/* Base utility for the "Softly" grain texture */
+.grain-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='a'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.65'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23a)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
