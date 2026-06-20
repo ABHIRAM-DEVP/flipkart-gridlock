@@ -20,7 +20,7 @@ def _resolve_csv_path() -> Path | None:
     return None
 
 
-def _clean_ts(value: object) -> object:
+def _clean_ts(value: object) -> object | None:
     """Convert CSV timestamp strings to either a valid ISO-ish datetime string or None.
 
     Prevents Postgres from receiving literal "NULL" (string), which breaks TIMESTAMP parsing.
@@ -28,11 +28,14 @@ def _clean_ts(value: object) -> object:
     if value is None:
         return None
     text = str(value).strip()
-    if not text or text.upper() in {"NULL", "NONE", "NAN", "NAT"}:
+    if not text or text.upper() in {"NULL", "NONE", "NAN", "NAT", ""}:
         return None
 
     # Normalize common variants; Postgres accepts 'YYYY-MM-DD HH:MM:SS[.ffffff]'
-    cleaned = text.replace("T", " ").replace("Z", "")
+    cleaned = text.replace("T", " ").replace("Z", "").strip()
+    if not cleaned or cleaned.upper() in {"NULL", "NONE", "NAN", "NAT"}:
+        return None
+
     try:
         # Validate parsability (multiple formats supported)
         for fmt in (
@@ -77,6 +80,14 @@ def seed() -> tuple[int, int]:
                 closed_dt = _clean_ts(row.get("closed_datetime"))
                 resolved_dt = _clean_ts(row.get("resolved_datetime"))
 
+                def sanitize_param(v: object) -> object:
+                    """Final safety check: ensure 'NULL' strings never reach the database."""
+                    if isinstance(v, str):
+                        s = v.strip()
+                        if s.upper() in {"NULL", "NONE", "NAN", "NAT"} or not s:
+                            return None
+                    return v
+
                 cur = conn.execute(
                     """
                     INSERT INTO events
@@ -87,27 +98,29 @@ def seed() -> tuple[int, int]:
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT (external_id) DO NOTHING
                     """,
-                    (
-                        row.get("id"),
-                        row.get("event_type"),
-                        row.get("event_cause"),
-                        row.get("corridor"),
-                        row.get("zone"),
-                        row.get("junction"),
-                        lat,
-                        lon,
-                        priority,
-                        rrc,
-                        row.get("address"),
-                        start_dt,
-                        end_dt,
-                        closed_dt,
-                        resolved_dt,
-                        row.get("status"),
-                        row.get("description"),
-                        row.get("direction"),
-                        row.get("veh_type"),
-                        row.get("police_station"),
+                    tuple(
+                        sanitize_param(v) for v in (
+                            row.get("id"),
+                            row.get("event_type"),
+                            row.get("event_cause"),
+                            row.get("corridor"),
+                            row.get("zone"),
+                            row.get("junction"),
+                            lat,
+                            lon,
+                            priority or None,
+                            rrc,
+                            row.get("address"),
+                            start_dt,
+                            end_dt,
+                            closed_dt,
+                            resolved_dt,
+                            row.get("status"),
+                            row.get("description"),
+                            row.get("direction"),
+                            row.get("veh_type"),
+                            row.get("police_station"),
+                        )
                     ),
                 )
                 if cur.rowcount:

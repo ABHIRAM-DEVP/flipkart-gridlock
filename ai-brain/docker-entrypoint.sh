@@ -21,7 +21,37 @@ if [ ! -f artifacts/bundle.pkl ] || [ ! -f artifacts/dur_model.pkl ] || [ ! -f a
   python src/train.py --csv "$CSV_PATH" --outdir artifacts
 fi
 
-echo "Initializing SQLite database..."
+# Wait for PostgreSQL to be ready using Python
+echo "Waiting for PostgreSQL to be ready..."
+python -c "
+import time
+import psycopg
+import os
+
+host = os.getenv('POSTGRES_HOST', 'postgres')
+port = int(os.getenv('POSTGRES_PORT', '5432'))
+user = os.getenv('POSTGRES_USER', 'postgres')
+password = os.getenv('POSTGRES_PASSWORD', 'data45Dada')
+db = os.getenv('POSTGRES_DB', 'astram')
+
+for i in range(30):
+    try:
+        conn = psycopg.connect(
+            host=host, port=port, user=user, password=password, dbname=db
+        )
+        conn.close()
+        print('PostgreSQL is ready!')
+        break
+    except Exception:
+        if i < 29:
+            print(f'PostgreSQL not ready yet, waiting... ({i+1}/30)')
+            time.sleep(1)
+        else:
+            print('PostgreSQL failed to start after 30 seconds')
+            exit(1)
+"
+
+echo "Initializing database..."
 python src/seed_db.py
 
 exec python app.py
