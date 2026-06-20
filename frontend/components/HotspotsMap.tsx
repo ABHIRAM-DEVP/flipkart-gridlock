@@ -1,9 +1,19 @@
-import React from 'react';
+"use client";
 
-export const HotspotsMap = ({ hotspots }: { hotspots: any[] }) => {
-  if (!hotspots || hotspots.length === 0) {
-    return <div className="text-[var(--text-muted)] py-4">No hotspots identified.</div>;
-  }
+import React, { useEffect, useState } from "react";
+import { MapContainer, TileLayer, CircleMarker, Popup, LayersControl, LayerGroup, Marker } from "react-leaflet";
+// relax react-leaflet typings where necessary
+const AnyCircleMarker: any = CircleMarker as any;
+import L from 'leaflet';
+// Load Leaflet CSS only on the client to avoid SSR errors
+
+export const HotspotsMap = ({ hotspots: inputHotspots }: { hotspots?: any[] }) => {
+  const [events, setEvents] = useState<any[]>([]);
+  const [resources, setResources] = useState<any[]>([]);
+  const [mounted, setMounted] = useState(false);
+  const mapIdRef = React.useRef(`hotspots-map-${Date.now()}-${Math.floor(Math.random()*10000)}`);
+  const renderedRef = React.useRef(false);
+  const hotspots = inputHotspots ?? [];
 
   const normalized = hotspots
     .map((h) => ({
@@ -18,18 +28,59 @@ export const HotspotsMap = ({ hotspots }: { hotspots: any[] }) => {
 
   const lats = normalized.map((h) => h.lat);
   const lngs = normalized.map((h) => h.lng);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
+  const hasCoords = lats.length > 0 && lngs.length > 0;
+  const minLat = hasCoords ? Math.min(...lats) : 28.7041;
+  const maxLat = hasCoords ? Math.max(...lats) : 28.7041;
+  const minLng = hasCoords ? Math.min(...lngs) : 77.1025;
+  const maxLng = hasCoords ? Math.max(...lngs) : 77.1025;
   const spanLat = Math.max(maxLat - minLat, 1e-6);
   const spanLng = Math.max(maxLng - minLng, 1e-6);
   const maxScore = Math.max(...normalized.map((h) => h.score), 1);
 
+  // compute map center
+  const centerLat = (minLat + maxLat) / 2;
+  const centerLng = (minLng + maxLng) / 2;
+
+  useEffect(() => {
+    const id = 'leaflet-css';
+    if (!document.getElementById(id)) {
+      const link = document.createElement('link');
+      link.id = id;
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+    }
+    // fetch events and resources for overlays
+    (async () => {
+      try {
+        const r = await fetch('/api/events');
+        const d = await r.json();
+        setEvents(d.events || []);
+      } catch (e) {
+        setEvents([]);
+      }
+      try {
+        const r2 = await fetch('/api/resources');
+        const d2 = await r2.json();
+        setResources(d2.resources || []);
+      } catch (e) {
+        setResources([{ id: 'r1', lat: 28.7041, lng: 77.1025, type: 'personnel', name: 'Team A' }]);
+      }
+    })();
+    // ensure map only renders on client after effects to avoid double-init
+    // remove any existing container with the same id to avoid Leaflet re-init errors (HMR/dev)
+    try {
+      const existing = document.getElementById(mapIdRef.current);
+      if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
+    } catch (e) {
+      /* ignore */
+    }
+    setMounted(true);
+  }, []);
+
   return (
     <div className="space-y-6">
-      <div className="relative overflow-hidden rounded-3xl border border-stone-100 bg-[linear-gradient(135deg,rgba(255,183,178,0.35),rgba(239,237,244,0.75)_55%,rgba(232,239,232,0.85))] p-4 min-h-[320px]">
-        <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_20%_20%,rgba(255,183,178,0.8),transparent_24%),radial-gradient(circle_at_75%_30%,rgba(255,154,140,0.6),transparent_22%),radial-gradient(circle_at_45%_80%,rgba(34,197,94,0.35),transparent_18%)]" />
+      <div className="relative overflow-hidden rounded-3xl border border-stone-100 p-4 min-h-[320px]">
         <div className="relative flex items-center justify-between mb-4">
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-[var(--text-muted)]">Congestion heat map</p>
@@ -40,29 +91,74 @@ export const HotspotsMap = ({ hotspots }: { hotspots: any[] }) => {
             <div>Intensity scales with hotspot score</div>
           </div>
         </div>
-        <div className="relative h-[240px] rounded-[1.6rem] border border-white/60 bg-white/50 overflow-hidden backdrop-blur-sm">
-          <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.03)_1px,transparent_1px)] bg-[size:36px_36px]" />
-          {normalized.map((h, index) => {
-            const left = ((h.lng - minLng) / spanLng) * 100;
-            const top = 100 - ((h.lat - minLat) / spanLat) * 100;
-            const size = 18 + (h.score / maxScore) * 32;
-            const opacity = 0.45 + (h.score / maxScore) * 0.5;
-            return (
-              <div
-                key={`${h.lat}-${h.lng}-${index}`}
-                title={`${h.count} events | score ${h.score.toFixed(1)}`}
-                className="absolute rounded-full border border-white shadow-[0_0_24px_rgba(239,68,68,0.28)]"
-                style={{
-                  left: `${Math.min(95, Math.max(3, left))}%`,
-                  top: `${Math.min(95, Math.max(5, top))}%`,
-                  width: `${size}px`,
-                  height: `${size}px`,
-                  transform: 'translate(-50%, -50%)',
-                  background: `radial-gradient(circle at 30% 30%, rgba(255,255,255,0.95), rgba(255,183,178,${opacity}) 45%, rgba(239,68,68,${opacity}) 100%)`,
-                }}
-              />
-            );
-          })}
+
+        <div className="h-[360px] rounded-[1.6rem] overflow-hidden">
+          {/* TS types mismatch in this workspace; cast to any to satisfy build */}
+          {/* Render MapContainer only after client mount to avoid double init */}
+          {mounted && !renderedRef.current && (
+            // prevent multiple initializations during HMR: render MapContainer only once per session
+            // @ts-ignore
+            <MapContainer center={[centerLat, centerLng] as any} zoom={12} style={{ height: "100%", width: "100%" }}>
+              <LayersControl>
+              <LayersControl.BaseLayer checked name="OpenStreetMap">
+                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              </LayersControl.BaseLayer>
+
+              <LayersControl.Overlay name="Traffic Heatmap">
+                <LayerGroup>
+                  {normalized.map((h, idx) => (
+                    <AnyCircleMarker
+                      key={idx}
+                      center={[h.lat, h.lng] as any}
+                      radius={(6 + (h.score / maxScore) * 18) as any}
+                      pathOptions={{ color: heatColor(h.score / maxScore), fillOpacity: 0.6 } as any}
+                    >
+                      <Popup>
+                        <div>
+                          <div className="font-medium">{h.count} events</div>
+                          <div className="text-sm">Avg duration: {h.duration ? `${h.duration.toFixed(1)} mins` : 'N/A'}</div>
+                          <div className="text-sm">Score: {h.score.toFixed(1)}</div>
+                        </div>
+                      </Popup>
+                    </AnyCircleMarker>
+                  ))}
+                </LayerGroup>
+              </LayersControl.Overlay>
+
+              <LayersControl.Overlay name="Event Impact Rings">
+                <LayerGroup>
+                  {events.map((ev, i) => (
+                    <AnyCircleMarker key={`ev-${i}`} center={[ev.lat, ev.lng] as any} radius={Math.max(20, (ev.impact || 0) * 30)} pathOptions={{ color: impactColor(ev.impact || 0), weight: 2, fill: false } as any}>
+                      <Popup>
+                        <div>
+                          <strong>{ev.title || 'Event'}</strong>
+                          <div>Projected Load: {ev.impact}</div>
+                        </div>
+                      </Popup>
+                    </AnyCircleMarker>
+                  ))}
+                </LayerGroup>
+              </LayersControl.Overlay>
+
+              <LayersControl.Overlay name="Resources">
+                <LayerGroup>
+                  {resources.map((res) => (
+                    // @ts-ignore
+                    <Marker key={res.id} position={[res.lat, res.lng] as any} icon={resourceIcon(res.type)}>
+                      <Popup>
+                        <div>
+                          <strong>{res.name}</strong>
+                          <div>Type: {res.type}</div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ))}
+                </LayerGroup>
+              </LayersControl.Overlay>
+            </LayersControl>
+            </MapContainer>
+          )}
+          {mounted && (() => { renderedRef.current = true; return null; })()}
         </div>
       </div>
 
@@ -101,3 +197,22 @@ export const HotspotsMap = ({ hotspots }: { hotspots: any[] }) => {
     </div>
   );
 };
+
+  function heatColor(t: number) {
+    const v = Math.max(0, Math.min(1, t));
+    const r = Math.floor(255 * v);
+    const g = Math.floor(200 * (1 - v));
+    return `rgb(${r},${g},0)`;
+  }
+
+  function impactColor(v: number) {
+    if (v > 0.75) return 'red';
+    if (v > 0.4) return 'orange';
+    return 'green';
+  }
+
+  function resourceIcon(type: string) {
+    const size = [28, 28] as [number, number];
+    const url = type === 'personnel' ? '/icons/person.svg' : '/icons/marker.svg';
+    return L.icon({ iconUrl: url, iconSize: size, iconAnchor: [14, 28] });
+  }

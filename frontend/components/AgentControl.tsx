@@ -35,7 +35,7 @@ export const AgentControl = () => {
         >
           {running ? "Running agent..." : "Run Agentic Workflow"}
         </button>
-        <div className="text-sm text-[var(--text-muted)]">Agent guides Predict → Plan → Impact</div>
+        <div className="text-sm text-[var(--text-muted)]">Agent guides Predict {"→"} Plan {"→"} Impact</div>
       </div>
 
       <div className="max-h-56 overflow-auto p-3 bg-white/60 rounded-lg border">

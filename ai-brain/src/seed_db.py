@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime
 from pathlib import Path
 
 from db import get_conn, init_db
@@ -17,6 +18,40 @@ def _resolve_csv_path() -> Path | None:
         for candidate in sorted(dataset_dir.glob("*.csv")):
             return candidate
     return None
+
+
+def _clean_ts(value: object) -> object:
+    """Convert CSV timestamp strings to either a valid ISO-ish datetime string or None.
+
+    Prevents Postgres from receiving literal "NULL" (string), which breaks TIMESTAMP parsing.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.upper() in {"NULL", "NONE", "NAN", "NAT"}:
+        return None
+
+    # Normalize common variants; Postgres accepts 'YYYY-MM-DD HH:MM:SS[.ffffff]'
+    cleaned = text.replace("T", " ").replace("Z", "")
+    try:
+        # Validate parsability (multiple formats supported)
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%d-%m-%Y %H:%M:%S.%f",
+            "%d-%m-%Y %H:%M:%S",
+            "%d-%m-%Y %H:%M",
+        ):
+            try:
+                dt = datetime.strptime(cleaned, fmt)
+                return dt.strftime("%Y-%m-%d %H:%M:%S.%f").rstrip("0").rstrip(".")
+            except ValueError:
+                continue
+        dt = datetime.fromisoformat(cleaned)
+        return dt.strftime("%Y-%m-%d %H:%M:%S.%f").rstrip("0").rstrip(".")
+    except Exception:
+        return None
 
 
 def seed() -> tuple[int, int]:
@@ -36,6 +71,12 @@ def seed() -> tuple[int, int]:
             try:
                 lat = float(row["latitude"]) if row.get("latitude") else None
                 lon = float(row["longitude"]) if row.get("longitude") else None
+
+                start_dt = _clean_ts(row.get("start_datetime"))
+                end_dt = _clean_ts(row.get("end_datetime"))
+                closed_dt = _clean_ts(row.get("closed_datetime"))
+                resolved_dt = _clean_ts(row.get("resolved_datetime"))
+
                 cur = conn.execute(
                     """
                     INSERT INTO events
@@ -58,10 +99,10 @@ def seed() -> tuple[int, int]:
                         priority,
                         rrc,
                         row.get("address"),
-                        row.get("start_datetime"),
-                        row.get("end_datetime"),
-                        row.get("closed_datetime"),
-                        row.get("resolved_datetime"),
+                        start_dt,
+                        end_dt,
+                        closed_dt,
+                        resolved_dt,
                         row.get("status"),
                         row.get("description"),
                         row.get("direction"),
@@ -91,3 +132,4 @@ def seed_db_if_empty() -> None:
 
 if __name__ == "__main__":
     seed()
+

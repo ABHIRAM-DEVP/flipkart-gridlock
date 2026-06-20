@@ -8,6 +8,7 @@ connection parameters from environment variables and falls back to the
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import os
 import threading
@@ -151,18 +152,33 @@ class _PgConnWrapper:
             sql2 = sql2.replace("INSERT OR IGNORE INTO", "INSERT INTO")
             sql2 = sql2 + " ON CONFLICT DO NOTHING"
         cur = self._conn.cursor(row_factory=dict_row)
-        if params:
-            cur.execute(sql2, tuple(params))
-        else:
-            cur.execute(sql2)
-        return cur
+        try:
+            if params:
+                cur.execute(sql2, tuple(params))
+            else:
+                cur.execute(sql2)
+            return cur
+        except Exception:
+            try:
+                # rollback to clear any aborted transaction state
+                self._conn.rollback()
+            except Exception:
+                pass
+            raise
 
     def executescript(self, script: str):
         cur = self._conn.cursor()
         statements = [s.strip() for s in script.split(";") if s.strip()]
-        for s in statements:
-            cur.execute(s)
-        return cur
+        try:
+            for s in statements:
+                cur.execute(s)
+            return cur
+        except Exception:
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            raise
 
     def commit(self):
         self._conn.commit()
@@ -424,11 +440,16 @@ def get_latest_hotspot_snapshot(snapshot_type: str) -> list | None:
         if not row:
             return None
         computed_at = row["computed_at"]
-        try:
-            ts = datetime.fromisoformat(computed_at.replace("Z", "+00:00"))
-        except ValueError:
-            ts = datetime.strptime(computed_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        age = (datetime.now(timezone.utc) - ts.replace(tzinfo=timezone.utc)).total_seconds()
+        if isinstance(computed_at, str):
+            try:
+                ts = datetime.fromisoformat(computed_at.replace("Z", "+00:00"))
+            except ValueError:
+                ts = datetime.strptime(computed_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        else:
+            ts = computed_at
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - ts).total_seconds()
         if age > 15:
             return None
         return _json_loads(row["data"], [])
@@ -525,19 +546,25 @@ def get_event_stats() -> dict:
 
         hour_counts: dict[str, int] = {}
         for row in conn.execute("SELECT start_datetime FROM events WHERE start_datetime IS NOT NULL").fetchall():
-            dt_str = row["start_datetime"] or ""
-            hour = None
-            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
-                try:
-                    hour = datetime.strptime(dt_str[:19], fmt[: len(dt_str)] if len(dt_str) < 19 else fmt).hour
-                    break
-                except ValueError:
-                    continue
-            if hour is None and "T" in dt_str:
-                try:
-                    hour = int(dt_str.split("T")[1][:2])
-                except (ValueError, IndexError):
-                    hour = 0
+            dt = row["start_datetime"]
+            if not dt:
+                continue
+            if isinstance(dt, str):
+                dt_str = dt
+                hour = None
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
+                    try:
+                        hour = datetime.strptime(dt_str[:19], fmt[: len(dt_str)] if len(dt_str) < 19 else fmt).hour
+                        break
+                    except ValueError:
+                        continue
+                if hour is None and "T" in dt_str:
+                    try:
+                        hour = int(dt_str.split("T")[1][:2])
+                    except (ValueError, IndexError):
+                        hour = 0
+            else:
+                hour = dt.hour
             if hour is not None:
                 key = str(hour)
                 hour_counts[key] = hour_counts.get(key, 0) + 1
@@ -549,7 +576,7 @@ def get_event_stats() -> dict:
                    COUNT(*) AS event_count,
                    AVG(CASE
                      WHEN closed_datetime IS NOT NULL AND start_datetime IS NOT NULL THEN
-                       (julianday(closed_datetime) - julianday(start_datetime)) * 24 * 60
+                       EXTRACT(EPOCH FROM (closed_datetime - start_datetime)) / 60
                      ELSE NULL END) AS avg_duration
             FROM events
             WHERE corridor IS NOT NULL AND corridor != ''

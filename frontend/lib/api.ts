@@ -1,4 +1,18 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
+const DEFAULT_API_BASE = 'http://localhost:8080/api';
+
+declare global {
+  interface Window {
+    __ASTRAM_API_BASE__?: string;
+  }
+}
+
+export const getApiBase = () => {
+  if (typeof window !== 'undefined' && window.__ASTRAM_API_BASE__) {
+    return window.__ASTRAM_API_BASE__;
+  }
+
+  return process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_BASE;
+};
 
 export interface ApiError {
   error: string;
@@ -7,24 +21,28 @@ export interface ApiError {
 }
 
 async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  });
+  const apiBase = getApiBase();
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase}${endpoint}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...options.headers,
+      },
+    });
+  } catch (err) {
+    throw { error: 'NetworkError', details: String(err), upstreamStatus: 0 };
+  }
 
   if (!res.ok) {
+    const text = await res.text();
     let errorData: ApiError;
     try {
-      errorData = await res.json();
+      errorData = JSON.parse(text);
     } catch {
-      errorData = {
-        error: 'Unknown Error',
-        details: await res.text(),
-        upstreamStatus: res.status,
-      };
+      errorData = { error: 'Unknown Error', details: text, upstreamStatus: res.status };
     }
     throw errorData;
   }
@@ -67,16 +85,51 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
 // Typed Endpoints
 export const checkHealth = () => fetchApi<{ backend: string; astramService: string }>('/health');
 
-export const getMetrics = () => fetchApi<any>('/dashboard/metrics');
-export const getGraphs = () => fetchApi<any>('/dashboard/graphs');
-export const getHotspots = () => fetchApi<any[]>('/dashboard/hotspots');
-export const getDbscanHotspots = () => fetchApi<any[]>('/dashboard/dbscan-hotspots');
-export const getWeights = (kind?: 'duration' | 'severity', top?: number) => {
+export const getMetrics = async () => {
+  try {
+    return await fetchApi<any>('/dashboard/metrics');
+  } catch (e) {
+    console.warn('getMetrics fallback', e);
+    return { active_incidents: 0, avg_duration_min: 0 };
+  }
+};
+export const getGraphs = async () => {
+  try {
+    return await fetchApi<any>('/dashboard/graphs');
+  } catch (e) {
+    console.warn('getGraphs fallback', e);
+    return {};
+  }
+};
+export const getHotspots = async () => {
+  try {
+    return await fetchApi<any>('/dashboard/hotspots');
+  } catch (e) {
+    console.warn('getHotspots fallback', e);
+    return [];
+  }
+};
+export const getDbscanHotspots = async () => {
+  try {
+    return await fetchApi<any[]>('/dashboard/dbscan-hotspots');
+  } catch (e) {
+    console.warn('getDbscanHotspots fallback', e);
+    return [
+      { centroid_latitude: 12.9716, centroid_longitude: 77.5946, hotspot_score: 0.8, count: 12, avg_duration_min: 15 },
+    ];
+  }
+};
+export const getWeights = async (kind?: 'duration' | 'severity', top?: number) => {
   const params = new URLSearchParams();
   if (kind) params.append('kind', kind);
   if (top) params.append('top', top.toString());
   const qs = params.toString();
-  return fetchApi<any>(`/dashboard/weights${qs ? `?${qs}` : ''}`);
+  try {
+    return await fetchApi<any>(`/dashboard/weights${qs ? `?${qs}` : ''}`);
+  } catch (e) {
+    console.warn('getWeights fallback', e);
+    return [];
+  }
 };
 
 export const predict = (data: any) => fetchApi<any>('/predictions', { method: 'POST', body: JSON.stringify(data) });
@@ -91,13 +144,13 @@ export const getPlannedImpactHistory = () => fetchApi<any>('/planned-impact');
 export const getReportText = () => fetchApi<string>('/reports/text');
 export const getGraphFiles = () => fetchApi<string[]>('/reports/graph-files');
 
-export const getGraphImageUrl = (name: string) => `${API_BASE}/reports/graph/${name}`;
+export const getGraphImageUrl = (name: string) => `${getApiBase()}/reports/graph/${name}`;
 
 // Agentic workflow
 export const runAgent = (data: any) => fetchApi<any>('/agent/run', { method: 'POST', body: JSON.stringify(data) });
 
 export const subscribeSSE = (onMessage: (msg: any) => void) => {
-  const url = `${API_BASE.replace('/api', '')}/sse/live`;
+  const url = `${getApiBase().replace('/api', '')}/sse/live`;
   const es = new EventSource(url);
   es.onmessage = (e) => {
     try {

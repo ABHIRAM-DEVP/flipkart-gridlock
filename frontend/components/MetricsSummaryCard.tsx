@@ -22,7 +22,6 @@ const EmptyMetrics = () => (
       <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Model Performance</h3>
     </div>
 
-    {/* Skeleton rows */}
     {['Duration R²', 'MAE (Duration)', 'Severity Accuracy'].map((label) => (
       <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.65rem 0', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
         <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{label}</span>
@@ -32,7 +31,7 @@ const EmptyMetrics = () => (
 
     <div style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
       <AlertTriangle size={13} color="var(--text-muted)" />
-      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Awaiting AI service connection…</span>
+      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Awaiting AI service connection...</span>
     </div>
     <style>{`@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }`}</style>
   </SoftCard>

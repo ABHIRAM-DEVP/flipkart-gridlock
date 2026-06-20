@@ -172,7 +172,7 @@ def _startup() -> None:
 @app.get("/health")
 def health():
     state = _ensure_state()
-    model_loaded = bool(state.get("pipeline") and state.get("pipeline_data") and state["pipeline_data"].get("dur_model"))
+    model_loaded = bool(state.get("dur_model") is not None)
     return jsonify({"status": "ok", "model_loaded": model_loaded})
 
 
@@ -299,7 +299,7 @@ def feedback_summary():
 def predict():
     event = _normalize_event(request.get_json(force=True) or {})
     state = _ensure_state()
-    model_loaded = bool(state.get("pipeline") and state.get("pipeline_data") and state["pipeline_data"].get("dur_model"))
+    model_loaded = bool(state.get("dur_model") is not None)
     if not model_loaded:
         return jsonify({"error": "models not loaded"}), 503
     result = predict_event(event, state)
@@ -318,7 +318,7 @@ def plan():
         events = body.get("events", [])
         budget = int(body.get("budget", 50))
     state = _ensure_state()
-    model_loaded = bool(state.get("pipeline") and state.get("pipeline_data") and state["pipeline_data"].get("dur_model"))
+    model_loaded = bool(state.get("dur_model") is not None)
     if not model_loaded:
         return jsonify({"error": "models not loaded"}), 503
     scored = [predict_event(_normalize_event(e), state) | {"event": e} for e in events]
@@ -333,7 +333,7 @@ def plan():
 def planned_impact():
     event = _normalize_event(request.get_json(force=True) or {})
     state = _ensure_state()
-    model_loaded = bool(state.get("pipeline") and state.get("pipeline_data") and state["pipeline_data"].get("dur_model"))
+    model_loaded = bool(state.get("dur_model") is not None)
     if not model_loaded:
         return jsonify({"error": "models not loaded"}), 503
     bundle = state["bundle"]
@@ -356,7 +356,7 @@ def sample_predict():
     with csv_path.open(newline="", encoding="utf-8", errors="replace") as f:
         sample = next(csv.DictReader(f))
     state = _ensure_state()
-    model_loaded = bool(state.get("pipeline") and state.get("pipeline_data") and state["pipeline_data"].get("dur_model"))
+    model_loaded = bool(state.get("dur_model") is not None)
     if not model_loaded:
         return jsonify({"error": "models not loaded"}), 503
     prediction = predict_event(_normalize_event(sample), state)

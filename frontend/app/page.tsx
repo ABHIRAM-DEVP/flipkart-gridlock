@@ -5,7 +5,8 @@ import { getDbscanHotspots, getHotspots, getMetrics, getPredictionsHistory, getW
 import { SoftCard } from "@/components/SoftCard";
 import { MetricsSummaryCard } from "@/components/MetricsSummaryCard";
 import { FeatureWeightsChart } from "@/components/FeatureWeightsChart";
-import { HotspotsMap } from "@/components/HotspotsMap";
+import dynamic from 'next/dynamic';
+const HotspotsMap = dynamic(() => import('@/components/HotspotsMap').then((m) => m.HotspotsMap), { ssr: false });
 import { PredictionHistoryTable } from "@/components/PredictionHistoryTable";
 import { AgentControl } from "@/components/AgentControl";
 
@@ -52,8 +53,10 @@ export default function Dashboard() {
         setDbscanHotspots(dRes);
         setPredictions(pRes?.content || []);
         setLastUpdated(new Date().toLocaleTimeString());
-      } catch (err) {
-        console.error("Dashboard fetch error:", err);
+      } catch (err: any) {
+        // show a compact message in dev but avoid noisy object dumps
+        const info = err?.details || err?.message || String(err);
+        console.debug("Dashboard fetch error:", info);
       } finally {
         if (mounted) setLoading(false);
       }
