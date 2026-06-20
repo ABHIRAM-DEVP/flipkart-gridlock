@@ -9,12 +9,6 @@ import numpy as np
 
 from astram_data import AggregateStats, normalize_text, parse_dt
 from operations import PlannedImpactStats
-from plots import (
-    save_bar_chart,
-    save_horizontal_bar_chart,
-    save_line_chart,
-    save_scatter_chart,
-)
 
 
 def _bar(value: float, max_value: float, width: int = 28) -> str:
@@ -44,7 +38,7 @@ def layer_descriptions() -> list[dict[str, str]]:
         },
         {
             "layer": "Layer 2",
-            "purpose": "Three ML/statistical models: LightGBM duration predictor, DBSCAN hotspots, planned-event multiplier.",
+            "purpose": "Hybrid stack: LOO target encoding, LGBM dynamics, Ridge temporal trends, median blend + safety cap.",
         },
         {
             "layer": "Layer 3",

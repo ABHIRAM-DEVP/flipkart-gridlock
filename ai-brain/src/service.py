@@ -7,14 +7,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from mimetypes import guess_type
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-
-import lightgbm as lgb
-
 from astram_data import AggregateStats
 from operations import PlannedImpactStats, allocate_resources, forecast_planned_event
-from predict import predict_from_bundle
-from reporting import build_service_payload, layer_descriptions
-from train import load_supervised_rows, split_time_order
+from predict import load_pipeline, predict_from_bundle
+from reporting import layer_descriptions
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,28 +29,39 @@ def _load_json(path: Path) -> dict:
 
 
 def _load_state(bundle_path: Path = DEFAULT_BUNDLE) -> dict[str, object]:
-    if not bundle_path.exists():
-        raise FileNotFoundError(f"Missing model bundle: {bundle_path}")
+    artifact_dir = bundle_path if bundle_path.is_dir() else bundle_path.parent
+    if not artifact_dir.exists():
+        raise FileNotFoundError(f"Missing artifacts directory: {artifact_dir}. Run: python src/train.py")
 
-    bundle = _load_json(bundle_path)
-    payload = _load_json(DEFAULT_PAYLOAD) if DEFAULT_PAYLOAD.exists() else None
-    report_text = DEFAULT_REPORT.read_text(encoding="utf-8") if DEFAULT_REPORT.exists() else ""
-    summary = _load_json(DEFAULT_SUMMARY) if DEFAULT_SUMMARY.exists() else {}
+    summary_path = artifact_dir / "summary.json"
+    summary = _load_json(summary_path) if summary_path.exists() else _load_json(DEFAULT_SUMMARY) if DEFAULT_SUMMARY.exists() else {}
+    pipeline = load_pipeline(artifact_dir)
+    bundle, dur_model, sev_model, encoder, stats, planned_stats = pipeline
+    payload = summary.get("metrics", bundle.get("metrics", {}))
 
-    stats = AggregateStats(**bundle["stats"])
-    planned_stats = PlannedImpactStats(**bundle["planned_stats"])
-    duration_model_path = Path(bundle["duration_model_file"])
-    if not duration_model_path.is_absolute():
-        duration_model_path = ROOT / duration_model_path
-    duration_booster = lgb.Booster(model_file=str(duration_model_path))
     return {
         "bundle": bundle,
-        "payload": payload,
-        "report_text": report_text,
+        "payload": {
+            "metrics": payload,
+            "hotspots": bundle.get("train_hotspots", []),
+            "dbscan_hotspots": bundle.get("dbscan_hotspots", []),
+            "graph_paths": bundle.get("graph_paths", summary.get("graph_paths", {})),
+            "dataset": summary.get("dataset", {}),
+            "feature_weights": bundle.get("feature_weights", summary.get("feature_weights", {"duration_feature_importance": []})),
+            "residual_interval": bundle.get("residual_interval", summary.get("residual_interval", {})),
+        },
+        "report_text": "",
         "summary": summary,
         "stats": stats,
         "planned_stats": planned_stats,
-        "duration_booster": duration_booster,
+        "pipeline": pipeline,
+        "pipeline_data": {
+            "dur_model": dur_model,
+            "sev_model": sev_model,
+            "encoder": encoder,
+            "stats": stats,
+            "planned_stats": planned_stats,
+        }
     }
 
 
@@ -77,10 +84,13 @@ def _text_response(handler: BaseHTTPRequestHandler, status: int, text: str, cont
 
 
 def _feature_weights(payload: dict[str, object], kind: str = "duration", top: int = 15) -> list[dict[str, float | str]]:
-    feature_names = payload["feature_weights"]["feature_names"]
+    fw = payload.get("feature_weights") or {}
+    if not fw and payload.get("feature_importance"):
+        fw = {"duration_feature_importance": payload.get("feature_importance")}
+    feature_names = fw.get("feature_names") or []
     if kind == "severity":
-        coefs = payload["feature_weights"]["severity_coef"]
-        class_names = payload["feature_weights"]["severity_classes"]
+        coefs = fw.get("severity_coef") or []
+        class_names = fw.get("severity_classes") or []
         rows = []
         for class_name, coef_row in zip(class_names, coefs, strict=False):
             pairs = sorted(zip(feature_names, coef_row), key=lambda item: abs(item[1]), reverse=True)[:top]
@@ -88,24 +98,25 @@ def _feature_weights(payload: dict[str, object], kind: str = "duration", top: in
                 rows.append({"class": class_name, "feature": feature_name, "weight": float(weight)})
         return rows
 
-    importances = payload["feature_weights"]["duration_feature_importance"]
+    importances = fw.get("duration_feature_importance") or []
     return [
-        {"feature": row["feature"], "weight": float(row["gain"]), "split": int(row["split"])}
+        {"feature": row["feature"], "weight": float(row.get("gain", row.get("weight", 0))), "split": int(row.get("split", 0))}
         for row in importances[:top]
     ]
 
 
 def _graphs(payload: dict[str, object]) -> dict[str, object]:
+    dataset = payload.get("dataset") or {}
     return {
-        "event_type_distribution": payload["dataset"]["event_types"],
-        "cause_distribution": payload["dataset"]["causes"],
-        "priority_distribution": payload["dataset"]["priority"],
-        "hotspots": payload["hotspots"][:12],
-        "dbscan_hotspots": payload["dbscan_hotspots"][:12],
+        "event_type_distribution": dataset.get("event_types", {}),
+        "cause_distribution": dataset.get("causes", {}),
+        "priority_distribution": dataset.get("priority", {}),
+        "hotspots": (payload.get("hotspots") or [])[:12],
+        "dbscan_hotspots": (payload.get("dbscan_hotspots") or [])[:12],
         "feature_weights": _feature_weights(payload, kind="duration", top=15),
         "severity_weights": _feature_weights(payload, kind="severity", top=8),
-        "metrics": payload["metrics"],
-        "residual_interval": payload["residual_interval"],
+        "metrics": payload.get("metrics", {}),
+        "residual_interval": payload.get("residual_interval", {}),
         "graph_paths": payload.get("graph_paths", {}),
     }
 
@@ -155,7 +166,8 @@ class AstramHandler(BaseHTTPRequestHandler):
             return _json_response(self, HTTPStatus.OK, {"status": "ok", "model_loaded": True})
 
         if path == "/metrics":
-            return _json_response(self, HTTPStatus.OK, self.state["payload"]["metrics"])
+            metrics = self.state["payload"].get("metrics") or self.state.get("summary", {})
+            return _json_response(self, HTTPStatus.OK, metrics)
 
         if path == "/graphs":
             return _json_response(self, HTTPStatus.OK, _graphs(payload))
@@ -244,14 +256,16 @@ class AstramHandler(BaseHTTPRequestHandler):
         stats = self.state["stats"]
         planned_stats = self.state["planned_stats"]
 
+        pipeline = self.state["pipeline"]
+
         if path == "/predict":
-            result = predict_from_bundle(bundle, body, duration_booster=self.state["duration_booster"])
+            result = predict_from_bundle(bundle, body, pipeline=pipeline)
             return _json_response(self, HTTPStatus.OK, result)
 
         if path == "/plan":
             events = body if isinstance(body, list) else body.get("events", [])
             budget = int(body.get("budget", 50)) if isinstance(body, dict) else 50
-            scored = [predict_from_bundle(bundle, event, duration_booster=self.state["duration_booster"]) | {"event": event} for event in events]
+            scored = [predict_from_bundle(bundle, event, pipeline=pipeline) | {"event": event} for event in events]
             allocation = allocate_resources(scored, total_personnel=budget)
             return _json_response(self, HTTPStatus.OK, {"scored_events": scored, "allocation": allocation})
 
@@ -261,7 +275,10 @@ class AstramHandler(BaseHTTPRequestHandler):
 
         if path == "/sample-predict":
             sample = _sample_event_payload()
-            return _json_response(self, HTTPStatus.OK, sample)
+            if not sample:
+                return _json_response(self, HTTPStatus.NOT_FOUND, {"error": "No CSV in dataset/"})
+            prediction = predict_from_bundle(bundle, sample, pipeline=pipeline)
+            return _json_response(self, HTTPStatus.OK, {"sample_event": sample, "prediction": prediction})
 
         self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
 
@@ -307,3 +324,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+    

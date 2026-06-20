@@ -1,6 +1,10 @@
+"""
+operations.py  –  DBSCAN hotspots, planned-event impact stats, resource allocation.
+"""
 from __future__ import annotations
+
 import math
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
@@ -18,6 +22,9 @@ from astram_data import (
 )
 
 
+# ---------------------------------------------------------------------------
+# DBSCAN geographic hotspots
+# ---------------------------------------------------------------------------
 @dataclass(slots=True)
 class DbscanHotspot:
     cluster_id: int
@@ -30,89 +37,20 @@ class DbscanHotspot:
     hotspot_score: float
 
 
-@dataclass(slots=True)
-class PlannedImpactStats:
-    corridor_hour_baseline: dict[str, float]
-    planned_key_rate: dict[str, float]
-    spillover_by_key: dict[str, float]
-    multiplier_by_key: dict[str, float]
-
-
-def nearest_hotspot_features(
-    latitude: float | None,
-    longitude: float | None,
-    hotspots: list[dict[str, Any]] | None,
-) -> dict[str, float]:
-    if latitude is None or longitude is None or not hotspots:
-        return {
-            "dbscan_min_distance_km": 0.0,
-            "dbscan_nearest_hotspot_score": 0.0,
-            "dbscan_nearest_hotspot_count": 0.0,
-            "hotspots_within_2.5km": 0.0,
-            "hotspots_within_5km": 0.0,
-        }
-
-    best_distance = float("inf")
-    best_score = 0.0
-    best_count = 0.0
-    
-    within_25k = 0.0
-    within_50k = 0.0
-
-    # Haversine implementation for precise geodesic distance calculations
-    lat1_rad = math.radians(latitude)
-
-    for hotspot in hotspots:
-        try:
-            lat2 = float(hotspot.get("centroid_latitude", 0.0))
-            lon2 = float(hotspot.get("centroid_longitude", 0.0))
-            score = float(hotspot.get("hotspot_score", 0.0))
-            count = float(hotspot.get("count", 0.0))
-        except (TypeError, ValueError):
-            continue
-
-        lat2_rad = math.radians(lat2)
-        dlat = math.radians(lat2 - latitude)
-        dlon = math.radians(lon2 - longitude)
-
-        a = (math.sin(dlat / 2.0) ** 2) + math.cos(lat1_rad) * math.cos(lat2_rad) * (math.sin(dlon / 2.0) ** 2)
-        c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-        distance_km = 6371.0 * c  # Mean earth radius in kilometers
-
-        # Increment local cluster density counters
-        if distance_km <= 2.5:
-            within_25k += 1.0
-        if distance_km <= 5.0:
-            within_50k += 1.0
-
-        if distance_km < best_distance:
-            best_distance = distance_km
-            best_score = score
-            best_count = count
-
-    if best_distance == float("inf"):
-        best_distance = 0.0
-
-    return {
-        "dbscan_min_distance_km": float(best_distance),
-        "dbscan_nearest_hotspot_score": float(best_score),
-        "dbscan_nearest_hotspot_count": float(best_count),
-        "hotspots_within_2.5km": within_25k,
-        "hotspots_within_5km": within_50k,
-    }
-
 def _valid_latlon(row: dict[str, str]) -> tuple[float, float] | None:
     try:
         lat = float(normalize_text(row.get("latitude")))
         lon = float(normalize_text(row.get("longitude")))
-    except ValueError:
+    except (ValueError, TypeError):
         return None
     if lat == 0.0 or lon == 0.0:
         return None
     return lat, lon
 
 
-def build_dbscan_hotspots(rows: list[dict[str, str]], eps: float = 0.005, min_samples: int = 5) -> list[DbscanHotspot]:
+def build_dbscan_hotspots(
+    rows: list[dict[str, str]], eps: float = 0.005, min_samples: int = 5
+) -> list[DbscanHotspot]:
     points: list[tuple[float, float]] = []
     row_refs: list[dict[str, str]] = []
     for row in rows:
@@ -136,64 +74,129 @@ def build_dbscan_hotspots(rows: list[dict[str, str]], eps: float = 0.005, min_sa
 
     results: list[DbscanHotspot] = []
     for cluster_id, cluster_rows in clusters.items():
-        coords = np.asarray([_valid_latlon(r) for r in cluster_rows if _valid_latlon(r) is not None], dtype=float)
-        if coords.size == 0:
-            continue
-        durations = [duration_minutes(r) for r in cluster_rows]
-        durations = [d for d in durations if d is not None]
-        count = len(cluster_rows)
-        high_rate = sum(normalize_text(r.get("priority")).lower() == "high" for r in cluster_rows) / count
-        closure_rate = sum(is_truthy(r.get("requires_road_closure")) for r in cluster_rows) / count
-        avg_duration = float(np.mean(durations)) if durations else 0.0
-        score = float(
-            100.0
-            * (0.4 * min(1.0, count / 20.0) + 0.3 * min(1.0, avg_duration / 240.0) + 0.2 * high_rate + 0.1 * closure_rate)
+        coords_arr = np.asarray(
+            [_valid_latlon(r) for r in cluster_rows if _valid_latlon(r) is not None],
+            dtype=float,
         )
-        results.append(
-            DbscanHotspot(
-                cluster_id=cluster_id,
-                count=count,
-                centroid_latitude=float(coords[:, 0].mean()),
-                centroid_longitude=float(coords[:, 1].mean()),
-                avg_duration_min=avg_duration,
-                high_priority_rate=float(high_rate),
-                road_closure_rate=float(closure_rate),
-                hotspot_score=score,
+        if coords_arr.size == 0:
+            continue
+        durations = [d for d in (duration_minutes(r) for r in cluster_rows) if d is not None]
+        count = len(cluster_rows)
+        high_rate = sum(
+            normalize_text(r.get("priority")).lower() in ("high", "critical")
+            for r in cluster_rows
+        ) / count
+        closure_rate = sum(is_truthy(r.get("requires_road_closure")) for r in cluster_rows) / count
+        avg_dur = float(np.mean(durations)) if durations else 0.0
+        score = float(
+            100.0 * (
+                0.4 * min(1.0, count / 20.0)
+                + 0.3 * min(1.0, avg_dur / 240.0)
+                + 0.2 * high_rate
+                + 0.1 * closure_rate
             )
         )
+        results.append(DbscanHotspot(
+            cluster_id=cluster_id, count=count,
+            centroid_latitude=float(coords_arr[:, 0].mean()),
+            centroid_longitude=float(coords_arr[:, 1].mean()),
+            avg_duration_min=avg_dur,
+            high_priority_rate=float(high_rate),
+            road_closure_rate=float(closure_rate),
+            hotspot_score=score,
+        ))
 
-    results.sort(key=lambda item: (item.hotspot_score, item.count), reverse=True)
+    results.sort(key=lambda h: (h.hotspot_score, h.count), reverse=True)
     return results
 
 
+def nearest_hotspot_features(
+    latitude: float | None,
+    longitude: float | None,
+    hotspots: list[dict[str, Any]] | None,
+) -> dict[str, float]:
+    zero = {
+        "dbscan_min_distance_km": 0.0,
+        "dbscan_nearest_hotspot_score": 0.0,
+        "dbscan_nearest_hotspot_count": 0.0,
+        "hotspots_within_2_5km": 0.0,
+        "hotspots_within_5km": 0.0,
+    }
+    if latitude is None or longitude is None or not hotspots:
+        return zero
+
+    best_dist = float("inf")
+    best_score = 0.0
+    best_count = 0.0
+    within_25 = 0.0
+    within_50 = 0.0
+    lat1_rad = math.radians(latitude)
+
+    for h in hotspots:
+        try:
+            lat2 = float(h.get("centroid_latitude", 0.0))
+            lon2 = float(h.get("centroid_longitude", 0.0))
+            score = float(h.get("hotspot_score", 0.0))
+            count = float(h.get("count", 0.0))
+        except (TypeError, ValueError):
+            continue
+
+        dlat = math.radians(lat2 - latitude)
+        dlon = math.radians(lon2 - longitude)
+        lat2_rad = math.radians(lat2)
+        a = math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
+        dist_km = 6371.0 * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+
+        if dist_km <= 2.5:
+            within_25 += 1.0
+        if dist_km <= 5.0:
+            within_50 += 1.0
+        if dist_km < best_dist:
+            best_dist, best_score, best_count = dist_km, score, count
+
+    return {
+        "dbscan_min_distance_km": float(best_dist if best_dist != float("inf") else 0.0),
+        "dbscan_nearest_hotspot_score": float(best_score),
+        "dbscan_nearest_hotspot_count": float(best_count),
+        "hotspots_within_2_5km": within_25,
+        "hotspots_within_5km": within_50,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Planned event impact statistics
+# ---------------------------------------------------------------------------
+@dataclass(slots=True)
+class PlannedImpactStats:
+    corridor_hour_baseline: dict[str, float]
+    planned_key_rate: dict[str, float]
+    spillover_by_key: dict[str, float]
+    multiplier_by_key: dict[str, float]
+
+
 def build_planned_impact_stats(rows: list[dict[str, str]]) -> PlannedImpactStats:
-    planned_rows = []
-    unplanned_rows = []
+    planned_rows, unplanned_rows = [], []
     for row in rows:
         dt = parse_dt(row.get("start_datetime"))
         if dt is None:
             continue
-        if normalize_text(row.get("event_type")) == "planned":
-            planned_rows.append(row)
-        else:
-            unplanned_rows.append(row)
+        (planned_rows if normalize_text(row.get("event_type")) == "planned" else unplanned_rows).append(row)
 
-    corridor_hour_counts: dict[str, int] = {}
-    corridor_hour_days: dict[str, set[str]] = {}
+    corr_hour_counts: dict[str, int] = {}
+    corr_hour_days: dict[str, set[str]] = {}
     for row in unplanned_rows:
         dt = parse_dt(row.get("start_datetime"))
         if dt is None:
             continue
         corridor = normalize_text(row.get("corridor")) or "unknown"
         key = f"{corridor}|{dt.hour}"
-        corridor_hour_counts[key] = corridor_hour_counts.get(key, 0) + 1
-        corridor_hour_days.setdefault(key, set()).add(dt.date().isoformat())
+        corr_hour_counts[key] = corr_hour_counts.get(key, 0) + 1
+        corr_hour_days.setdefault(key, set()).add(dt.date().isoformat())
 
-    corridor_hour_baseline: dict[str, float] = {}
-    for key, count in corridor_hour_counts.items():
-        days = max(1, len(corridor_hour_days.get(key, set())))
-        corridor_hour_baseline[key] = count / days
-
+    baseline: dict[str, float] = {
+        k: v / max(1, len(corr_hour_days.get(k, set())))
+        for k, v in corr_hour_counts.items()
+    }
     planned_key_rate: dict[str, float] = {}
     spillover_by_key: dict[str, float] = {}
     multiplier_by_key: dict[str, float] = {}
@@ -205,25 +208,21 @@ def build_planned_impact_stats(rows: list[dict[str, str]]) -> PlannedImpactStats
         corridor = normalize_text(row.get("corridor")) or "unknown"
         cause = normalize_text(row.get("event_cause")) or "unknown"
         key = f"{cause}|{corridor}|{dt.hour}"
-
         window_start = dt - timedelta(hours=3)
         window_end = dt + timedelta(hours=3)
-        spillover = 0
-        baseline = corridor_hour_baseline.get(f"{corridor}|{dt.hour}", 0.0)
-        for other in unplanned_rows:
-            other_dt = parse_dt(other.get("start_datetime"))
-            if other_dt is None:
-                continue
-            if normalize_text(other.get("corridor")) != corridor:
-                continue
-            if window_start <= other_dt <= window_end:
-                spillover += 1
+        spillover = sum(
+            1 for other in unplanned_rows
+            if normalize_text(other.get("corridor")) == corridor
+            and (other_dt := parse_dt(other.get("start_datetime"))) is not None
+            and window_start <= other_dt <= window_end
+        )
+        b = baseline.get(f"{corridor}|{dt.hour}", 0.0)
         planned_key_rate[key] = planned_key_rate.get(key, 0.0) + 1.0
         spillover_by_key[key] = spillover_by_key.get(key, 0.0) + spillover
-        multiplier_by_key[key] = (spillover + 1.0) / (baseline + 1.0)
+        multiplier_by_key[key] = (spillover + 1.0) / (b + 1.0)
 
     return PlannedImpactStats(
-        corridor_hour_baseline=corridor_hour_baseline,
+        corridor_hour_baseline=baseline,
         planned_key_rate=planned_key_rate,
         spillover_by_key=spillover_by_key,
         multiplier_by_key=multiplier_by_key,
@@ -231,42 +230,37 @@ def build_planned_impact_stats(rows: list[dict[str, str]]) -> PlannedImpactStats
 
 
 def forecast_planned_event(
-    event: dict[str, str],
-    stats: AggregateStats,
-    planned_stats: PlannedImpactStats,
+    event: dict[str, Any], stats: AggregateStats, planned_stats: PlannedImpactStats
 ) -> dict[str, Any]:
     dt = parse_dt(event.get("start_datetime"))
     corridor = normalize_text(event.get("corridor")) or "unknown"
     cause = normalize_text(event.get("event_cause")) or "unknown"
     hour = dt.hour if dt else -1
     key = f"{cause}|{corridor}|{hour}"
-    baseline = planned_stats.corridor_hour_baseline.get(f"{corridor}|{hour}", 0.0)
+    b = planned_stats.corridor_hour_baseline.get(f"{corridor}|{hour}", 0.0)
     multiplier = planned_stats.multiplier_by_key.get(key, 1.0)
     spillover = planned_stats.spillover_by_key.get(key, 0.0)
     planned_rate = planned_stats.planned_key_rate.get(key, 0.0)
     corridor_risk = stats.hotspot_scores.get(corridor, 0.0)
-
-    expected_spillover = spillover / max(1.0, planned_rate)
-    adjusted_duration_multiplier = max(1.0, multiplier, stats.planned_multiplier_by_cause.get(cause, 1.0))
+    expected_spill = spillover / max(1.0, planned_rate)
+    adj_mult = max(1.0, multiplier, stats.planned_multiplier_by_cause.get(cause, 1.0))
     return {
         "planned_key": key,
-        "baseline_unplanned_rate": round(baseline, 4),
-        "spillover_events_per_planned_event": round(expected_spillover, 2),
-        "impact_multiplier": round(adjusted_duration_multiplier, 2),
-        "compounding_risk_score": round(min(100.0, corridor_risk + expected_spillover * 10.0), 2),
+        "baseline_unplanned_rate": round(b, 4),
+        "spillover_events_per_planned_event": round(expected_spill, 2),
+        "impact_multiplier": round(adj_mult, 2),
+        "compounding_risk_score": round(min(100.0, corridor_risk + expected_spill * 10.0), 2),
         "recommend_preposition_hours_before": 3,
     }
 
 
+# ---------------------------------------------------------------------------
+# Resource allocation (MILP)
+# ---------------------------------------------------------------------------
 def _severity_to_bounds(severity: str) -> tuple[int, int]:
-    severity = severity.lower()
-    if severity == "low":
-        return 1, 1
-    if severity == "medium":
-        return 2, 3
-    if severity == "high":
-        return 4, 5
-    return 6, 8
+    return {"low": (1, 1), "medium": (2, 3), "high": (4, 5), "critical": (6, 8)}.get(
+        severity.lower(), (2, 3)
+    )
 
 
 def allocate_resources(events: list[dict[str, Any]], total_personnel: int = 50) -> dict[str, Any]:
@@ -274,56 +268,43 @@ def allocate_resources(events: list[dict[str, Any]], total_personnel: int = 50) 
         return {"status": "empty", "allocations": [], "remaining_personnel": total_personnel}
 
     n = len(events)
-    min_bounds = []
-    max_bounds = []
-    weights = []
-    severities = []
+    min_bounds, max_bounds, weights, severities = [], [], [], []
     for event in events:
         severity = str(event.get("predicted_severity", "medium")).lower()
-        min_manpower, max_manpower = _severity_to_bounds(severity)
-        min_bounds.append(min_manpower)
-        max_bounds.append(max_manpower)
-        base_weight = float(event.get("risk_score", event.get("predicted_duration_min", 0.0)))
-        extra = 5.0 if severity == "critical" else 0.0
-        weights.append(base_weight + extra)
+        lo, hi = _severity_to_bounds(severity)
+        min_bounds.append(lo)
+        max_bounds.append(hi)
+        base_w = float(event.get("risk_score", event.get("predicted_duration_min", 0.0)))
+        weights.append(base_w + (5.0 if severity == "critical" else 0.0))
         severities.append(severity)
 
-    # Decision vector is [x_0..x_n-1, y_0..y_n-1] where x is assigned personnel and y is whether the event is covered.
-    num_vars = 2 * n
-    c = np.zeros(num_vars, dtype=float)
-    for i, weight in enumerate(weights):
-        c[n + i] = -weight
+    c = np.zeros(2 * n, dtype=float)
+    for i, w in enumerate(weights):
+        c[n + i] = -w
 
-    integrality = np.ones(num_vars, dtype=int)
     bounds = Bounds(
-        lb=np.asarray([0.0] * n + [0.0] * n, dtype=float),
+        lb=np.zeros(2 * n),
         ub=np.asarray(max_bounds + [1.0] * n, dtype=float),
     )
+    integrality = np.ones(2 * n, dtype=int)
 
-    a_rows = []
-    a_lbs = []
-    a_ubs = []
-
-    # Sum of all assigned personnel <= total budget
-    total_row = np.zeros(num_vars, dtype=float)
+    a_rows, a_lbs, a_ubs = [], [], []
+    total_row = np.zeros(2 * n)
     total_row[:n] = 1.0
     a_rows.append(total_row)
     a_lbs.append(-np.inf)
     a_ubs.append(float(total_personnel))
-
-    # Min and max constraints per event based on coverage binary y_i
     for i in range(n):
-        row_min = np.zeros(num_vars, dtype=float)
-        row_min[i] = -1.0
-        row_min[n + i] = float(min_bounds[i])
-        a_rows.append(row_min)
+        r_min = np.zeros(2 * n)
+        r_min[i] = -1.0
+        r_min[n + i] = float(min_bounds[i])
+        a_rows.append(r_min)
         a_lbs.append(-np.inf)
         a_ubs.append(0.0)
-
-        row_max = np.zeros(num_vars, dtype=float)
-        row_max[i] = 1.0
-        row_max[n + i] = -float(max_bounds[i])
-        a_rows.append(row_max)
+        r_max = np.zeros(2 * n)
+        r_max[i] = 1.0
+        r_max[n + i] = -float(max_bounds[i])
+        a_rows.append(r_max)
         a_lbs.append(-np.inf)
         a_ubs.append(0.0)
 
@@ -335,41 +316,39 @@ def allocate_resources(events: list[dict[str, Any]], total_personnel: int = 50) 
         solution = None
 
     if solution is None:
+        # Greedy fallback
         remaining = total_personnel
-        allocations = []
-        ranked = sorted(range(n), key=lambda i: weights[i] / max(min_bounds[i], 1), reverse=True)
         assigned = [0] * n
-        for idx in ranked:
+        for idx in sorted(range(n), key=lambda i: weights[i] / max(min_bounds[i], 1), reverse=True):
             if remaining <= 0:
                 break
-            need = min_bounds[idx]
-            give = min(need, remaining)
+            give = min(min_bounds[idx], remaining)
             assigned[idx] = give
             remaining -= give
-        allocations = [
-            {"event_index": i, "assigned_personnel": assigned[i], "severity": severities[i], "risk_score": weights[i]}
-            for i in range(n)
-        ]
-        return {"status": "fallback_greedy", "allocations": allocations, "remaining_personnel": remaining}
+        return {
+            "status": "fallback_greedy",
+            "allocations": [
+                {"event_index": i, "assigned_personnel": assigned[i],
+                 "severity": severities[i], "risk_score": weights[i]}
+                for i in range(n)
+            ],
+            "remaining_personnel": remaining,
+        }
 
-    assigned = np.rint(solution[:n]).astype(int)
-    covered = np.rint(solution[n:]).astype(int)
-    allocations = []
-    used = 0
-    for i, event in enumerate(events):
-        assigned_i = int(max(0, assigned[i]))
-        used += assigned_i
-        allocations.append(
-            {
-                "event_index": i,
-                "assigned_personnel": assigned_i,
-                "covered": bool(covered[i]),
-                "severity": severities[i],
-                "risk_score": weights[i],
-                "planned_duration_min": float(event.get("predicted_duration_min", 0.0)),
-            }
-        )
-
+    assigned_arr = np.rint(solution[:n]).astype(int)
+    covered_arr = np.rint(solution[n:]).astype(int)
+    used = int(np.sum(np.maximum(0, assigned_arr)))
+    allocations = [
+        {
+            "event_index": i,
+            "assigned_personnel": int(max(0, assigned_arr[i])),
+            "covered": bool(covered_arr[i]),
+            "severity": severities[i],
+            "risk_score": weights[i],
+            "planned_duration_min": float(events[i].get("predicted_duration_min", 0.0)),
+        }
+        for i in range(n)
+    ]
     return {
         "status": "optimal" if getattr(result, "success", False) else "approximate",
         "allocations": allocations,
