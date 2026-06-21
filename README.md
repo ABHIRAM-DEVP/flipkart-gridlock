@@ -1,11 +1,16 @@
-# ASTRA M — Traffic Intelligence Command Platform
+# ASTRAM — Traffic Intelligence Command Platform
+**By Abhiram Moreshwar Daflapurkar for Gridlock Hackathon 2.0 - Round 2 **
 
+<<<<<<< HEAD
 By **Abhiram Moreshwar Daflapurkar**
 Submission for **Gridlock Hackathon 2.0 - Round 2**
 Team: **Abhiram's Team : smart-byte-347**
 Theme: **Event-Driven Congestion (Planned & Unplanned)**
 
 
+=======
+**Theme: Event-Driven Congestion (Planned & Unplanned) **
+>>>>>>> 8f355f7ff8d3e56e53e56420d8b716305c8e610a
 > Live event-driven congestion scoring + planned spillover forecasting for corridor operations.
 
 This repo is **containerized**. It runs:
@@ -35,8 +40,13 @@ This repo is **containerized**. It runs:
 ## 2) Clone the repo
 
 ```bash
+<<<<<<< HEAD
 git clone <YOUR_GITHUB_URL>
 cd flipkart-grilock-round2
+=======
+git clone https://github.com/ABHIRAM-DEVP/flipkart-gridlock
+cd flipkart-gridlock
+>>>>>>> 8f355f7ff8d3e56e53e56420d8b716305c8e610a
 ```
 
 ---
@@ -96,12 +106,16 @@ What starts:
 ## 5) Stop the app
 
 ```bash
+<<<<<<< HEAD
 docker compose down
 ```
 
 To keep Postgres data, use:
 ```bash
 docker compose down --remove-orphans
+=======
+ctrl+c
+>>>>>>> 8f355f7ff8d3e56e53e56420d8b716305c8e610a
 ```
 
 ---
@@ -123,6 +137,7 @@ Then open:
 
 ---
 
+<<<<<<< HEAD
 ## 7) Demo modules + 5-minute speaker script (content)
 
 Use this narration while demoing pages like **Astram Dashboard**, **Command Center**, **Field HUD**, **Predict**, **Plan**, **Planned Impact**, **Reports**, and **Sign out**.
@@ -153,9 +168,78 @@ Then we move to **Planned Impact**, where we forecast spillover for scheduled ev
 “Finally, the **Command Center** highlights the learning loop. After the post-event stage, the UI encourages operator feedback—so we can compare predicted vs observed congestion patterns and tune assumptions.
 
 This closed-loop approach matters because the hard part isn’t only prediction accuracy; it’s also operational adaptation over time. Astram turns every event into a learning signal, so the system gets better—not just louder.”
+=======
+## 7) Tech stack
 
----
+- **Astram ML service (Flask / Python)**: scikit-learn **HistGradientBoosting** models for **duration** (regression) and **severity** (multi-class classification), plus DBSCAN hotspot clustering.
+- **Backend (Spring Boot / Java)**: API/orchestration layer that connects UI ↔ Postgres ↔ Astram service.
+- **Frontend (Next.js / React + TypeScript)**: operational dashboards with map overlays, charts, and modules (Dashboard, Command Center, Field HUD, Predict, Plan, Planned Impact, Reports).
+- **Database (PostgreSQL)**: stores events, predictions, plans, planned-impact forecasts, and metrics snapshots.
+- **Live updates (SSE)**: server-sent events stream to keep the dashboard refreshing with real-time intelligence.
 
+## 8) System architecture (high-level)
+
+### Architecture diagram (container + data flow)
+
+```text
+Operator Browser / UI (Next.js :3000)
+        |
+        | REST calls + SSE subscription
+        v
+Backend (Spring Boot :8080)
+        |
+        | 1) calls
+        v
+Astram ML Service (Flask :8000)
+        |
+        | 2) predictions, plans, spillover forecast
+        | 3) live updates via SSE
+        v
+PostgreSQL (astram :5432)
+```
+
+
+
+
+### Component flow (who talks to whom)
+1. **UI Request** (Next.js)
+   - User opens pages and submits events for **Predict** / **Plan** / **Planned Impact**.
+2. **Backend Orchestration** (Spring Boot)
+   - Validates inputs
+   - Calls Astram endpoints
+   - Persists results in PostgreSQL
+3. **ML Inference & Forecasting** (Flask)
+   - Loads trained artifacts
+   - Predicts incident duration + severity tier
+   - Generates operational recommendations (manpower, barricades, diversion guidance)
+   - Forecasts spillover impact for planned events
+4. **Live stream** (SSE)
+   - Dashboard subscribes to updates
+   - UI refreshes “Live traffic intelligence” automatically.
+5. **Docker**
+   -for containerization
+
+## 9) Important container startup note (your current error)
+
+Your terminal shows:
+- `TypeError: int() argument must be ... POSTGRES_PORT ... NoneType`
+
+This means the root `.env` is missing **`POSTGRES_PORT`** (or not being read by `astram-service`).
+
+Fix:
+1. Ensure repo-root `.env` contains at least:
+   - `POSTGRES_PORT=5432`
+   - `POSTGRES_USER=...`
+   - `POSTGRES_PASSWORD=...`
+2. Re-run:
+```bash
+docker compose up --build
+```
+
+>>>>>>> 8f355f7ff8d3e56e53e56420d8b716305c8e610a
+
+
+<<<<<<< HEAD
 ## 8) Troubleshooting
 
 - **Containers won’t start**: confirm Docker Desktop is running and ports 3000/8000/8080/5432 are free.
@@ -229,4 +313,13 @@ Fix:
 docker compose up --build
 ```
 
+=======
+
+## Repo layout
+- **`ai-brain/`** — Flask ML service
+- **`backend/`** — Spring Boot API
+- **`frontend/`** — Next.js UI
+- **`docker-compose.yml`** — orchestration
+- **`.env`** — environment variables for Compose
+>>>>>>> 8f355f7ff8d3e56e53e56420d8b716305c8e610a
 
