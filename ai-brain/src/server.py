@@ -413,7 +413,7 @@ def sse_live():
         client_q = broadcaster.subscribe()
         try:
             for item in db.get_recent_live_feed(limit=10):
-                yield f"data: {json.dumps(item)}\n\n"
+                yield f"data: {json.dumps(item, default=str)}\n\n"
             while True:
                 try:
                     msg = client_q.get(timeout=20)
