@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Add this line to create the missing output folder
+RUN mkdir -p artifacts
+
 COPY requirements.txt .
 # Retry pip install to avoid transient network timeouts (3 attempts, 120s timeout)
 RUN set -eux \
