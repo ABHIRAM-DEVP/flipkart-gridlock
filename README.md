@@ -90,12 +90,7 @@ What starts:
 ## 5) Stop the app
 
 ```bash
-docker compose down
-```
-
-To keep Postgres data, use:
-```bash
-docker compose down --remove-orphans
+ctrl+c
 ```
 
 ---
@@ -117,40 +112,7 @@ Then open:
 
 ---
 
-## 7) Demo modules + 5-minute speaker script (content)
-
-Use this narration while demoing pages like **Astram Dashboard**, **Command Center**, **Field HUD**, **Predict**, **Plan**, **Planned Impact**, **Reports**, and **Sign out**.
-
-### Minute 0–1: Problem framing
-“We operate corridors where traffic breakdowns come from both planned and unplanned events—political rallies, festivals, sports matches, construction, and sudden gatherings. The challenge is that we can’t reliably **quantify impact ahead of time**.
-
-So response becomes experience-driven: manpower and barricades are deployed late, and after the event we often don’t have a closed-loop learning mechanism—so the same congestion patterns repeat.
-
-Astram is built to change this: it’s an event-driven congestion intelligence platform that forecasts **how long an incident will last**, **how severe it will be**, and—most importantly—what response to deploy: **manpower**, **barricading**, and **diversion guidance**.”
-
-### Minute 1–2: Live traffic intelligence + model performance
-“Here in the dashboard, live intelligence refreshes every **15 seconds**. That lets us continuously update risk and predictions as conditions change.
-
-We track both duration quality and severity tier quality—like MAE and R² for duration, and accuracy/F1 for severity classes. In the demo you’ll see the system surface clearance-time estimates, predicted severity, and confidence interval bounds.”
-
-### Minute 2–3: Predict (single incident scoring)
-“Now I’ll switch to **Predict**. The key idea is that the model scores using the same fields it was trained on—event timing, event type and cause, corridor and junction context, geographic signals like latitude/longitude, and whether a road closure is required.
-
-When we submit an incident, Astram returns predicted duration in minutes, a severity tier, and a recommended operations bundle.”
-
-### Minute 3–4: Plan + Planned Impact (agentic workflow)
-“Next is **Plan**. Instead of one incident, we score multiple events and allocate limited manpower under a budget. This is where operational planning matters—higher risk events get prioritized for staffing, and lower priority items get staged or monitored.
-
-Then we move to **Planned Impact**, where we forecast spillover for scheduled events. Planned events let us pre-stage: manpower, barricades, and diversion guidance before congestion spreads into adjacent road networks.”
-
-### Minute 4–5: Closed-loop learning (why it’s hard today)
-“Finally, the **Command Center** highlights the learning loop. After the post-event stage, the UI encourages operator feedback—so we can compare predicted vs observed congestion patterns and tune assumptions.
-
-This closed-loop approach matters because the hard part isn’t only prediction accuracy; it’s also operational adaptation over time. Astram turns every event into a learning signal, so the system gets better—not just louder.”
-
----
-
-## 8) Troubleshooting
+## Troubleshooting
 
 - **Containers won’t start**: confirm Docker Desktop is running and ports 3000/8000/8080/5432 are free.
 - **Database errors**: double-check `.env` values for `POSTGRES_USER`, `POSTGRES_PASSWORD`, and ensure they match `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD`.
@@ -158,7 +120,7 @@ This closed-loop approach matters because the hard part isn’t only prediction 
 
 ---
 
-## 9) Repo layout
+## Repo layout
 - **`ai-brain/`** — Flask ML service
 - **`backend/`** — Spring Boot API
 - **`frontend/`** — Next.js UI
