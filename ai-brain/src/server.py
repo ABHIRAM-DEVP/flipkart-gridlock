@@ -412,8 +412,30 @@ def sse_live():
     def generate():
         client_q = broadcaster.subscribe()
         try:
+            # Clean historical items completely before streaming
             for item in db.get_recent_live_feed(limit=10):
-                yield f"data: {json.dumps(item, default=str)}\n\n"
+                yield f"data: {json.dumps(clean_data(item))}\n\n"
+                
+            while True:
+                try:
+                    msg = client_q.get(timeout=20)
+                except queue.Empty:
+                    yield 'data: {"type":"heartbeat"}\n\n'
+                    continue
+                # Also deep clean messages coming from real-time events broker channel
+                yield f"data: {json.dumps(clean_data(msg))}\n\n"
+        except GeneratorExit:
+            broadcaster.unsubscribe(client_q)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+# Clean the item completely before converting to JSON text
+cleaned_item = clean_data(item)
+yield f"data: {json.dumps(cleaned_item)}\n\n"
             while True:
                 try:
                     msg = client_q.get(timeout=20)
