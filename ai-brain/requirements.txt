@@ -11,3 +11,4 @@ seaborn==0.13.2
 python-dotenv==1.2.0
 reportlab==4.4.0
 psycopg[binary]==3.2.2
+flask-cors
