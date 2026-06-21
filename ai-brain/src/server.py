@@ -407,6 +407,8 @@ def hotspot_snapshot():
 
 # ── SSE ──────────────────────────────────────────────────────────────────────
 
+# ── SSE ──────────────────────────────────────────────────────────────────────
+
 @app.get("/sse/live")
 def sse_live():
     def generate():
@@ -432,7 +434,6 @@ def sse_live():
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
 # Clean the item completely before converting to JSON text
 cleaned_item = clean_data(item)
 yield f"data: {json.dumps(cleaned_item)}\n\n"
