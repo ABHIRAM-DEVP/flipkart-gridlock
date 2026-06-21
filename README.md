@@ -2,10 +2,10 @@
 **By Abhiram Moreshwar Daflapurkar for Gridlock Hackathon 2.0 - Round 2 **
 
 
-By **Abhiram Moreshwar Daflapurkar**
-Submission for **Gridlock Hackathon 2.0 - Round 2**
-Team: **Abhiram's Team : smart-byte-347**
-Theme: **Event-Driven Congestion (Planned & Unplanned)**
+- By **Abhiram Moreshwar Daflapurkar**
+- Submission for **Gridlock Hackathon 2.0 - Round 2**
+- Team: **Abhiram's Team : smart-byte-347**
+- Theme: **Event-Driven Congestion (Planned & Unplanned)**
 
 
 =======
@@ -40,9 +40,7 @@ This repo is **containerized**. It runs:
 ## 2) Clone the repo
 
 ```bash
-git clone https://github.com/ABHIRAM-DEVP/flipkart-gridlock
-cd flipkart-grilock-round2
-=======
+
 git clone https://github.com/ABHIRAM-DEVP/flipkart-gridlock
 cd flipkart-gridlock
 ```
