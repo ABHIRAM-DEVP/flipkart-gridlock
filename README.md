@@ -120,7 +120,8 @@ Then open:
 - **Database (PostgreSQL)**: stores events, predictions, plans, planned-impact forecasts, and metrics snapshots.
 - **Live updates (SSE)**: server-sent events stream to keep the dashboard refreshing with real-time intelligence.
 
-## 8) System architecture (high-level)
+## 10) System architecture (high-level)
+
 ### Architecture diagram
 
 ```mermaid
