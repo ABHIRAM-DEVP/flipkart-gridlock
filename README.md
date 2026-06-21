@@ -112,13 +112,50 @@ Then open:
 
 ---
 
-## Troubleshooting
+## 7) Tech stack
 
-- **Containers won’t start**: confirm Docker Desktop is running and ports 3000/8000/8080/5432 are free.
-- **Database errors**: double-check `.env` values for `POSTGRES_USER`, `POSTGRES_PASSWORD`, and ensure they match `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD`.
-- **Flask model not loaded**: ensure `ai-brain/artifacts/bundle.json` and model files exist in the mounted `artifacts/` directory (Docker volume uses that path).
+- **Astram ML service (Flask / Python)**: scikit-learn **HistGradientBoosting** models for **duration** (regression) and **severity** (multi-class classification), plus DBSCAN hotspot clustering.
+- **Backend (Spring Boot / Java)**: API/orchestration layer that connects UI ↔ Postgres ↔ Astram service.
+- **Frontend (Next.js / React + TypeScript)**: operational dashboards with map overlays, charts, and modules (Dashboard, Command Center, Field HUD, Predict, Plan, Planned Impact, Reports).
+- **Database (PostgreSQL)**: stores events, predictions, plans, planned-impact forecasts, and metrics snapshots.
+- **Live updates (SSE)**: server-sent events stream to keep the dashboard refreshing with real-time intelligence.
 
----
+## 8) System architecture (high-level)
+
+1. **UI Request** (Next.js)
+   - User opens pages and submits events for **Predict** / **Plan** / **Planned Impact**.
+2. **Backend Orchestration** (Spring Boot)
+   - Validates inputs
+   - Calls Astram endpoints
+   - Persists results in PostgreSQL
+3. **ML Inference & Forecasting** (Flask)
+   - Loads trained artifacts
+   - Predicts incident duration + severity tier
+   - Generates operational recommendations (manpower, barricades, diversion guidance)
+   - Forecasts spillover impact for planned events
+4. **Live stream** (SSE)
+   - Dashboard subscribes to updates
+   - UI refreshes “Live traffic intelligence” automatically.
+
+## 9) Important container startup note (your current error)
+
+Your terminal shows:
+- `TypeError: int() argument must be ... POSTGRES_PORT ... NoneType`
+
+This means the root `.env` is missing **`POSTGRES_PORT`** (or not being read by `astram-service`).
+
+Fix:
+1. Ensure repo-root `.env` contains at least:
+   - `POSTGRES_PORT=5432`
+   - `POSTGRES_USER=...`
+   - `POSTGRES_PASSWORD=...`
+2. Re-run:
+```bash
+docker compose up --build
+```
+
+
+
 
 ## Repo layout
 - **`ai-brain/`** — Flask ML service
