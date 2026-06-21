@@ -1,6 +1,6 @@
 """Flask application — replaces ThreadingHTTPServer (service.py)."""
 from __future__ import annotations
-
+from flask_cors import CORS
 import argparse
 import json
 import queue
@@ -33,7 +33,7 @@ app = Flask(
     template_folder=str(ROOT / "templates"),
     static_folder=str(ROOT / "static"),
 )
-
+CORS(app, origins=["https://flipkart-gridlock-frontend.onrender.com"])
 _STATE: dict = {}
 _STATE_LOCK = threading.Lock()
 
