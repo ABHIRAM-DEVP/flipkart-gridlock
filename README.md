@@ -1,5 +1,7 @@
-# ASTRA M — Traffic Intelligence Command Platform
+# ASTRAM — Traffic Intelligence Command Platform
+**By Abhiram Moreshwar Daflapurkar for Gridlock Hackathon 2.0 - Round 2 **
 
+**Theme: Event-Driven Congestion (Planned & Unplanned) **
 > Live event-driven congestion scoring + planned spillover forecasting for corridor operations.
 
 This repo is **containerized**. It runs:
