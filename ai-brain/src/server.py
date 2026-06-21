@@ -1,6 +1,6 @@
 """Flask application — replaces ThreadingHTTPServer (service.py)."""
 from __future__ import annotations
-
+from flask_cors import CORS
 import argparse
 import json
 import queue
@@ -33,7 +33,7 @@ app = Flask(
     template_folder=str(ROOT / "templates"),
     static_folder=str(ROOT / "static"),
 )
-
+CORS(app, origins=["https://flipkart-gridlock-frontend.onrender.com"])
 _STATE: dict = {}
 _STATE_LOCK = threading.Lock()
 
@@ -404,16 +404,40 @@ def hotspot_snapshot():
         corridor = corridor or bundle.get("train_hotspots", [])
     return jsonify({"dbscan": dbscan, "corridor": corridor})
 
-
+# Helper generator pulled completely out of the endpoint to prevent indentation nesting bugs
+def sse_event_stream():
+    client_q = broadcaster.subscribe()
+    try:
+        # Clean historical items completely before streaming
+        for item in db.get_recent_live_feed(limit=10):
+            yield f"data: {json.dumps(clean_data(item))}\n\n"
+            
+        while True:
+            try:
+                msg = client_q.get(timeout=20)
+            except queue.Empty:
+                yield 'data: {"type":"heartbeat"}\n\n'
+                continue
+            # Deep clean real-time messages
+            yield f"data: {json.dumps(clean_data(msg))}\n\n"
+    except GeneratorExit:
+        broadcaster.unsubscribe(client_q)
+# ── SSE ──────────────────────────────────────────────────────────────────────
 # ── SSE ──────────────────────────────────────────────────────────────────────
 
 @app.get("/sse/live")
 def sse_live():
-    def generate():
-        client_q = broadcaster.subscribe()
-        try:
-            for item in db.get_recent_live_feed(limit=10):
-                yield f"data: {json.dumps(item)}\n\n"
+    return Response(
+        stream_with_context(sse_event_stream()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+# ── SSE ──────────────────────────────────────────────────────────────────────
+
+
+# Clean the item completely before converting to JSON text
+cleaned_item = clean_data(item)
+yield f"data: {json.dumps(cleaned_item)}\n\n"
             while True:
                 try:
                     msg = client_q.get(timeout=20)
