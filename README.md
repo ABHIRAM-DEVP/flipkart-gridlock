@@ -29,7 +29,7 @@ This repo is **containerized**. It runs:
 ## 2) Clone the repo
 
 ```bash
-git clone <YOUR_GITHUB_URL>
+git clone https://github.com/ABHIRAM-DEVP/flipkart-gridlock
 cd flipkart-grilock-round2
 ```
 
