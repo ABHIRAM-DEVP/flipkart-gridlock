@@ -120,7 +120,7 @@ Then open:
 - **Database (PostgreSQL)**: stores events, predictions, plans, planned-impact forecasts, and metrics snapshots.
 - **Live updates (SSE)**: server-sent events stream to keep the dashboard refreshing with real-time intelligence.
 
-## 10) System architecture (high-level)
+## 8) System architecture (high-level)
 
 ### Architecture diagram (container + data flow)
 
@@ -159,8 +159,8 @@ PostgreSQL (astram :5432)
 4. **Live stream** (SSE)
    - Dashboard subscribes to updates
    - UI refreshes “Live traffic intelligence” automatically.
-
-
+5. **Docker**
+   -for containerization
 
 ## 9) Important container startup note (your current error)
 
