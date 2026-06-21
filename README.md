@@ -40,7 +40,7 @@ This repo is **containerized**. It runs:
 ## 2) Clone the repo
 
 ```bash
-git clone <YOUR_GITHUB_URL>
+git clone https://github.com/ABHIRAM-DEVP/flipkart-gridlock
 cd flipkart-grilock-round2
 =======
 git clone https://github.com/ABHIRAM-DEVP/flipkart-gridlock
@@ -87,6 +87,10 @@ docker compose up --build
 ```
 
 What starts:
+-**at SignUp/Login page:  **
+- **credentials are: **
+- **username: astram-admin**
+- **password: astram-demo**
 - **astram-service** (Flask) on **http://localhost:8000**
 - **postgres** (DB)
 - **backend** (Spring Boot) on **http://localhost:8080**
