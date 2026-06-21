@@ -122,24 +122,27 @@ Then open:
 
 ## 10) System architecture (high-level)
 
-### Architecture diagram
+### Architecture diagram (container + data flow)
 
-```mermaid
-graph TD
-  U[Operator / Browser UI] -->|HTTPS/Web| F[Next.js Command Center (port 3000)]
-  F -->|REST calls| B[Spring Boot Backend (port 8080)]
-  B -->|Persist/Query| PG[(PostgreSQL: astram)]
-  B -->|HTTP API| A[Astram ML Service (Flask, port 8000)]
-  A -->|SSE stream| F
-
-  %% ML actions
-  A --> P1[Predict duration + severity]
-  A --> P2[Operational plan: manpower/barricades/diversion]
-  A --> P3[Planned-event spillover forecast]
-
-  %% storage/actions
-  B -->|store results| PG
+```text
+Operator Browser / UI (Next.js :3000)
+        |
+        | REST calls + SSE subscription
+        v
+Backend (Spring Boot :8080)
+        |
+        | 1) calls
+        v
+Astram ML Service (Flask :8000)
+        |
+        | 2) predictions, plans, spillover forecast
+        | 3) live updates via SSE
+        v
+PostgreSQL (astram :5432)
 ```
+
+
+
 
 ### Component flow (who talks to whom)
 1. **UI Request** (Next.js)
