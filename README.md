@@ -89,6 +89,8 @@ What starts:
 - **credentials are: **
 - **username: astram-admin**
 - **password: astram-demo**
+
+  
 - **astram-service** (Flask) on **http://localhost:8000**
 - **postgres** (DB)
 - **backend** (Spring Boot) on **http://localhost:8080**
