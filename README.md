@@ -121,7 +121,26 @@ Then open:
 - **Live updates (SSE)**: server-sent events stream to keep the dashboard refreshing with real-time intelligence.
 
 ## 8) System architecture (high-level)
+### Architecture diagram
 
+```mermaid
+graph TD
+  U[Operator / Browser UI] -->|HTTPS/Web| F[Next.js Command Center (port 3000)]
+  F -->|REST calls| B[Spring Boot Backend (port 8080)]
+  B -->|Persist/Query| PG[(PostgreSQL: astram)]
+  B -->|HTTP API| A[Astram ML Service (Flask, port 8000)]
+  A -->|SSE stream| F
+
+  %% ML actions
+  A --> P1[Predict duration + severity]
+  A --> P2[Operational plan: manpower/barricades/diversion]
+  A --> P3[Planned-event spillover forecast]
+
+  %% storage/actions
+  B -->|store results| PG
+```
+
+### Component flow (who talks to whom)
 1. **UI Request** (Next.js)
    - User opens pages and submits events for **Predict** / **Plan** / **Planned Impact**.
 2. **Backend Orchestration** (Spring Boot)
@@ -136,6 +155,8 @@ Then open:
 4. **Live stream** (SSE)
    - Dashboard subscribes to updates
    - UI refreshes “Live traffic intelligence” automatically.
+
+
 
 ## 9) Important container startup note (your current error)
 
