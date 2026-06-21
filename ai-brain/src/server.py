@@ -404,32 +404,31 @@ def hotspot_snapshot():
         corridor = corridor or bundle.get("train_hotspots", [])
     return jsonify({"dbscan": dbscan, "corridor": corridor})
 
-
+# Helper generator pulled completely out of the endpoint to prevent indentation nesting bugs
+def sse_event_stream():
+    client_q = broadcaster.subscribe()
+    try:
+        # Clean historical items completely before streaming
+        for item in db.get_recent_live_feed(limit=10):
+            yield f"data: {json.dumps(clean_data(item))}\n\n"
+            
+        while True:
+            try:
+                msg = client_q.get(timeout=20)
+            except queue.Empty:
+                yield 'data: {"type":"heartbeat"}\n\n'
+                continue
+            # Deep clean real-time messages
+            yield f"data: {json.dumps(clean_data(msg))}\n\n"
+    except GeneratorExit:
+        broadcaster.unsubscribe(client_q)
 # ── SSE ──────────────────────────────────────────────────────────────────────
 # ── SSE ──────────────────────────────────────────────────────────────────────
 
 @app.get("/sse/live")
 def sse_live():
-    def generate():
-        client_q = broadcaster.subscribe()
-        try:
-            # Clean historical items completely before streaming
-            for item in db.get_recent_live_feed(limit=10):
-                yield f"data: {json.dumps(clean_data(item))}\n\n"
-                
-            while True:
-                try:
-                    msg = client_q.get(timeout=20)
-                except queue.Empty:
-                    yield 'data: {"type":"heartbeat"}\n\n'
-                    continue
-                # Also deep clean messages coming from real-time events broker channel
-                yield f"data: {json.dumps(clean_data(msg))}\n\n"
-        except GeneratorExit:
-            broadcaster.unsubscribe(client_q)
-
     return Response(
-        stream_with_context(generate()),
+        stream_with_context(sse_event_stream()),
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
