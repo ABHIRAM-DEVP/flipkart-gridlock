@@ -32,7 +32,7 @@ This repo is **containerized**. It runs:
 
 ```bash
 git clone https://github.com/ABHIRAM-DEVP/flipkart-gridlock
-cd flipkart-grilock
+cd flipkart-gridlock
 ```
 
 ---
