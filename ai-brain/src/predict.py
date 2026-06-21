@@ -83,19 +83,12 @@ def _extract_v2_maps(stats_dict: dict[str, Any]) -> dict[str, dict]:
 def load_artifacts(artifacts_dir: Path | None = None) -> dict[str, Any]:
     d = artifacts_dir or ARTIFACTS_DIR
     bundle = _load_bundle_dict(d)
-    dur_model = sev_model = enc = None
-    # Load models with resilience to pickle compatibility issues.
-    try:
-        with (d / "dur_model.pkl").open("rb") as f:
-            dur_model = pickle.load(f)
-        with (d / "sev_model.pkl").open("rb") as f:
-            sev_model = pickle.load(f)
-        with (d / "encoder.pkl").open("rb") as f:
-            enc = pickle.load(f)
-    except Exception as exc:
-        # Model unpickling failed (often due to numpy BitGenerator mismatch).
-        # Log the error and continue with None placeholders so the service can start.
-        print(f"[startup] model load failed: {exc}")
+    with (d / "dur_model.pkl").open("rb") as f:
+        dur_model = pickle.load(f)
+    with (d / "sev_model.pkl").open("rb") as f:
+        sev_model = pickle.load(f)
+    with (d / "encoder.pkl").open("rb") as f:
+        enc = pickle.load(f)
     return {"bundle": bundle, "dur_model": dur_model, "sev_model": sev_model, "enc": enc}
 
 

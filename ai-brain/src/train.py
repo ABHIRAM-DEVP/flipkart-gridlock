@@ -15,8 +15,9 @@ from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
-
+import matplotlib.pyplot as plt
 import numpy as np
+from sklearn.metrics import precision_score, recall_score
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
@@ -342,6 +343,115 @@ def get_feature_importance(
         key=lambda x: x["importance"],
         reverse=True,
     )
+
+   # =========================================================
+    # HACKATHON VISUALIZATION HELPERS
+    # =========================================================
+
+def save_confusion_matrix(y_true, y_pred, labels, out_path):
+    cm = confusion_matrix(y_true, y_pred)
+
+    plt.figure(figsize=(7, 6))
+    plt.imshow(cm, cmap="Blues")
+    plt.title("Confusion Matrix - Severity")
+    plt.colorbar()
+
+    plt.xticks(range(len(labels)), labels, rotation=45)
+    plt.yticks(range(len(labels)), labels)
+
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            plt.text(j, i, cm[i, j], ha="center", va="center")
+
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+
+def save_f1_precision_recall(y_true, y_pred, labels, out_path):
+    f1 = f1_score(y_true, y_pred, average=None)
+    prec = precision_score(y_true, y_pred, average=None)
+    rec = recall_score(y_true, y_pred, average=None)
+
+    x = np.arange(len(labels))
+
+    plt.figure(figsize=(10, 6))
+    plt.bar(x - 0.2, f1, 0.2, label="F1")
+    plt.bar(x, prec, 0.2, label="Precision")
+    plt.bar(x + 0.2, rec, 0.2, label="Recall")
+
+    plt.xticks(x, labels)
+    plt.title("Classification Metrics")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+
+def save_actual_vs_predicted(actual, pred, out_path):
+    plt.figure(figsize=(6, 6))
+    plt.scatter(actual, pred, alpha=0.5)
+
+    max_val = max(max(actual), max(pred))
+    plt.plot([0, max_val], [0, max_val], "r--")
+    plt.title("Actual vs Predicted Duration")
+    plt.xlabel("Actual")
+    plt.ylabel("Predicted")
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+
+def save_residuals(actual, pred, out_path):
+    residuals = np.array(actual) - np.array(pred)
+
+    plt.figure(figsize=(8, 5))
+    plt.hist(residuals, bins=40, color="purple", alpha=0.7)
+    plt.axvline(0, color="red")
+    plt.title("Residual Distribution")
+    plt.xlabel("Error")
+    plt.ylabel("Count")
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+
+def save_feature_importance(features, values, out_path):
+    idx = np.argsort(values)[-15:]
+
+    plt.figure(figsize=(10, 6))
+    plt.barh(np.array(features)[idx], np.array(values)[idx])
+    plt.title("Top Feature Importance")
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+
+def save_error_trend(actual, pred, out_path):
+    errors = np.abs(np.array(actual) - np.array(pred))
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(sorted(errors))
+    plt.title("Error Trend (Sorted)")
+    plt.xlabel("Samples")
+    plt.ylabel("Absolute Error")
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+
+def save_severity_distribution(y, labels, out_path):
+    counts = [list(y).count(i) for i in range(len(labels))]
+
+    plt.figure(figsize=(7, 5))
+    plt.bar(labels, counts)
+    plt.title("Severity Distribution")
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
 # ---------------------------------------------------------------------------
 # Main train-and-save pipeline
 # ---------------------------------------------------------------------------
@@ -376,6 +486,73 @@ def train_and_save(rows: list[dict[str, str]], outdir: Path) -> dict:
     
     metrics = evaluate_models(cat_cols, num_cols, enc, dur_model, sev_model,
                               test_x, test_y_dur, test_y_sev)
+    feat_importance = get_feature_importance(cat_cols, num_cols, dur_model, X_test, test_y_dur)
+
+    print("[7/6] Generating plots...")
+
+    # Transform test data
+    X_test = transform(test_x, cat_cols, num_cols, enc)
+
+    # Predictions
+    dur_pred = np.expm1(dur_model.predict(X_test))
+    dur_pred = np.clip(dur_pred, 0.0, MAX_FORECAST_MINUTES)
+
+    actual = test_y_dur.tolist()
+    predicted = dur_pred.tolist()
+
+    # Residuals
+    residuals = [a - p for a, p in zip(actual, predicted)]
+
+    # 1. Actual vs Predicted plot
+    save_actual_vs_predicted(actual, predicted, outdir / "actual_vs_pred.png")
+
+    # 2. Residual histogram
+    save_residual_histogram(residuals, outdir / "residuals.png")
+
+    
+    print("[7/7] Generating hackathon graphs...")
+
+    X_test = transform(test_x, cat_cols, num_cols, enc)
+
+    dur_pred = np.expm1(dur_model.predict(X_test))
+    dur_pred = np.clip(dur_pred, 0, MAX_FORECAST_MINUTES)
+
+    actual = test_y_dur.tolist()
+    sev_pred = sev_model.predict(X_test)
+
+    labels = ["low", "medium", "high", "critical"]
+
+    
+
+
+     
+
+    # 1. Confusion Matrix
+    save_confusion_matrix(test_y_sev, sev_pred, labels, outdir / "confusion_matrix.png")
+
+    # 2. F1 / Precision / Recall
+    save_f1_precision_recall(test_y_sev, sev_pred, labels, outdir / "metrics_bar.png")
+
+    # 3. Actual vs Predicted
+    save_actual_vs_predicted(actual, dur_pred, outdir / "actual_vs_pred.png")
+
+    # 4. Residuals
+    save_residuals(actual, dur_pred, outdir / "residuals.png")
+
+    # 5. Feature Importance
+    feat_names = [f["feature"] for f in feat_importance]
+    feat_vals = [f["importance"] for f in feat_importance]
+    save_feature_importance(feat_names, feat_vals, outdir / "feature_importance.png")
+
+    # 6. Error trend
+    save_error_trend(actual, dur_pred, outdir / "error_trend.png")
+
+    # 7. Severity distribution
+    save_severity_distribution(test_y_sev, labels, outdir / "severity_distribution.png")
+
+    print("All 7 graphs saved successfully ✔")
+
+    print("      Plots saved in artifacts folder.")
 
     print("\n" + "=" * 55)
     print("  EVALUATION RESULTS")
@@ -400,7 +577,6 @@ def train_and_save(rows: list[dict[str, str]], outdir: Path) -> dict:
 
     # Feature importance
     # Pass test_x and test_y_dur to the importance function
-    feat_importance = get_feature_importance(cat_cols, num_cols, dur_model, X_test, test_y_dur)
 
     # Hotspot summary rows
     train_hotspots = build_hotspot_rows(train_rows, stats)

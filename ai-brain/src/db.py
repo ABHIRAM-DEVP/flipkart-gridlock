@@ -122,11 +122,11 @@ CREATE TABLE IF NOT EXISTS live_feed_events (
 
 
 def _pg_connect():
-    host = os.getenv("POSTGRES_HOST", "postgres")
-    port = int(os.getenv("POSTGRES_PORT", "5432"))
-    db = os.getenv("POSTGRES_DB", "astram")
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "data45Dada")
+    host = os.getenv("POSTGRES_HOST")
+    port = int(os.getenv("POSTGRES_PORT"))
+    db = os.getenv("POSTGRES_DB")
+    user = os.getenv("POSTGRES_USER")
+    password = os.getenv("POSTGRES_PASSWORD")
     conn = psycopg.connect(
         host=host, port=port, dbname=db, user=user, password=password, autocommit=False
     )

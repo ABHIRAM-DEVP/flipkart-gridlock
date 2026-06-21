@@ -18,16 +18,16 @@ services:
     image: postgres:15-alpine
     container_name: astram-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-data45Dada}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: astram
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:${POSTGRES_PORT}"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d astram"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d astram"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -41,9 +41,9 @@ services:
     volumes:
       - ./ai-brain/artifacts:/opt/astram-artifacts:ro
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/astram
-      - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER:-postgres}
-      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-data45Dada}
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:${POSTGRES_PORT}/astram
+      - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER}
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD}
       - ASTRAM_SERVICE_URL=http://astram-service:8000
       - ASTRAM_FALLBACK_DIR=/opt/astram-artifacts
     restart: unless-stopped
