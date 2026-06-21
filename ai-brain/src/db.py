@@ -585,7 +585,7 @@ def get_event_stats() -> dict:
         ).fetchall():
             count = row["event_count"] or 0
             avg_dur = row["avg_duration"] or 0.0
-            risk = min(100.0, count * 2.5 + (avg_dur or 0) / 5.0)
+            risk = min(100.0, count * 2.5 + float(avg_dur or 0) / 5.0)
             corridor_risk.append(
                 {
                     "corridor": row["corridor"],
